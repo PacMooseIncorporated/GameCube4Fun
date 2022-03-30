@@ -43,7 +43,7 @@ cd /home/gc/gamecube-examples
 make
 
 cd /home/gc/GRRLIB/GRRLIB
-make PLATFORM=cube all
+make PLATFORM=cube clean all install
 
 cd /home/gc/GameCube4Fun/examples_gc/template
 make
@@ -53,7 +53,10 @@ make
 
  - libogc: https://libogc.devkitpro.org/
  - GRRLIB: https://grrlib.github.io/GRRLIB/
- - 
+ - Interesting article on the GAmeCube GX and libogc: https://devkitpro.org/wiki/libogc/GX#Preface
+ - Forums: 
+   - https://devkitpro.org/viewforum.php?f=40
+   - http://grrlib.santo.fr/forum/ 
 
 ## Installing Docker without Docker Desktop on WSL2
 
