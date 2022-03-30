@@ -1,6 +1,8 @@
 # GameCube4Fun
 
-## Prerequisites
+## Setup
+
+### Prerequisites
 
  - Ubuntu (works with WSL2 too)
  - Dolphin GameCube emulator (https://dolphin-emu.org/)
@@ -9,7 +11,7 @@
    - WSL remote if using WSL2
    - ...  
 
-## Installation
+### Installation
 
 From your Ubuntu non-root account:
 
@@ -49,7 +51,28 @@ cd /home/gc/GameCube4Fun/examples_gc/template
 make
 ````
 
-## Documentation
+### Updating devkitPro
+
+Ref: https://devkitpro.org/wiki/devkitPro_pacman#Using_Pacman
+In the docker container, ssing `dkp-pacman`:
+
+````bash
+# to update the database
+dkp-pacman -Sy
+
+# to upgrade installed packages
+dkp-pacman -Syu
+
+# To list packages (filtered)
+dkp-pacman -Sl | grep gamecube
+dkp-pacman -Sl | grep ppc
+
+# to install a package or group of packages:
+dkp-pacman -S gamecube-examples
+dkp-pacman -S gamecube-dev
+````
+
+### Documentation
 
  - libogc: https://libogc.devkitpro.org/
  - GRRLIB: https://grrlib.github.io/GRRLIB/
@@ -58,7 +81,7 @@ make
    - https://devkitpro.org/viewforum.php?f=40
    - http://grrlib.santo.fr/forum/ 
 
-## Installing Docker without Docker Desktop on WSL2
+### Installing Docker without Docker Desktop on WSL2
 
 ````bash
 sudo apt install --no-install-recommends apt-transport-https ca-certificates curl gnupg2
@@ -78,7 +101,7 @@ if service docker status 2>&1 | grep -q "is not running"; then
 fi
 ````
 
-## GameCube Specs
+### GameCube Specs
 
 ### CPU
 
