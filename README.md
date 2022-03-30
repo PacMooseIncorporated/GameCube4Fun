@@ -13,7 +13,11 @@
 
 From your Ubuntu non-root account:
 
-Retrieve DevkitPro for PPC Docker image
+Retrieve DevkitPro for PPC Docker image. This image contains:
+ - cross-compliation toolchain for PPC and ARM
+ - standard libraries pre-compiled: libz, libturbojpeg, libpng/u, libvorbis, libogg, linmpg123, libfreetype, libode, libgd
+ - libogc already compiled which also compiles:
+   - libiso9660, libmodplay, libmad, libasnd, libaesnd, libdb, lwip
 
 ````bash
 sudo docker pull devkitpro/devkitppc
@@ -30,22 +34,26 @@ git clone https://github.com/GRRLIB/GRRLIB.git
 git clone https://github.com/PacMooseIncorporated/GameCube4Fun.git
 ````
 
-Compile the GRRLIB and GAmeCube examples (already in devkitPro `/opt/devkitpro/examples/gamecube` in fact)
+Compile the GRRLIB, GameCube examples (already in devkitPro `/opt/devkitpro/examples/gamecube` in fact)
 
 ````bash
 sudo docker run --rm -it --name devkit -v /projects/gc:/home/gc devkitpro/devkitppc bash
-cd /home/gc
-
-cd /home/gc/GRRLIB/GRRLIB
-make PLATFORM=cube all
 
 cd /home/gc/gamecube-examples
 make
+
+cd /home/gc/GRRLIB/GRRLIB
+make PLATFORM=cube all
 
 cd /home/gc/GameCube4Fun/examples_gc/template
 make
 ````
 
+## Documentation
+
+ - libogc: https://libogc.devkitpro.org/
+ - GRRLIB: https://grrlib.github.io/GRRLIB/
+ - 
 
 ## Installing Docker without Docker Desktop on WSL2
 
