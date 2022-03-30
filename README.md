@@ -103,7 +103,7 @@ fi
 
 ### GameCube Specs
 
-### CPU
+#### CPU
 
  - 485 MHz IBM "Gekko" PowerPC CPU based on the 750CXe and 750FX achieving 1125 DMIPS (Dhrystone 2.1)
  - 7-stage floating point unit: 64-bit double precision FPU, usable as 2×32-bit SIMD for 1.9 single-precision GFLOPS performance, often found under the denomination "paired singles"
@@ -119,7 +119,7 @@ fi
    - 256 KB 2-way set-associative L2 cache
  - Front-side bus: 64-bit enhanced 60x bus to Flipper northbridge at 162 MHz clock with 1.3 GB/s peak bandwidth (32-bit address, 64-bit data bus)
 
-### GPU
+#### GPU
  
  - 162 MHz ArtX-designed ATI "Flipper" ASIC (9.4 GFLOPS)
  - Contains GPU, audio DSP, I/O controller and northbridge
@@ -131,7 +131,7 @@ fi
  - Raw polygon performance: 90 million polygons/sec
  - Real-time decompression of display list, hardware motion compensation capability, HW 3-line deflickering filter
 
-### Memory
+#### Memory
 
  - 43 MB total non-unified RAM
    - 24 MB (2x 12 MB) MoSys 1T-SRAM @ 324 MHz (codenamed "Splash") as main system RAM
@@ -141,13 +141,13 @@ fi
  - Memory bandwidth: 1.3 GB/s Gekko to Northbridge, 2.6 GB/s Flipper to main system RAM, 10.4 GB/s texture cache, 7.8 GB/s framebuffer/Z-buffer, 81 MB/s auxiliary RAM[5]
  - Latency: Under 10 ns main memory, 5 ns texture cache, 5 ns framebuffer memory
 
-### Audio
+#### Audio
 
  - Audio processor integrated into Flipper: custom 81 MHz Macronix 16-bit DSP
  - External auxiliary RAM: 16 MB DRAM @ 81 MHz
  - Stereo output (may contain 5.1-channel surround via Dolby Pro Logic II)
 
-### Video
+#### Video
 
  - 640×480 interlaced (480i) @ 60 Hz
  - 640×480 progressive scan (480p) @ 60 Hz (NTSC only)
