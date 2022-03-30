@@ -103,6 +103,8 @@ fi
 
 ### GameCube Specs
 
+Interesting architecture analysis: https://www.copetti.org/writings/consoles/gamecube/
+
 #### CPU
 
  - 485 MHz IBM "Gekko" PowerPC CPU based on the 750CXe and 750FX achieving 1125 DMIPS (Dhrystone 2.1)
