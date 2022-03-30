@@ -105,6 +105,8 @@ fi
 
 Interesting architecture analysis: https://www.copetti.org/writings/consoles/gamecube/
 
+![Diagram](https://www.copetti.org/images/consoles/gamecube/diagram.16197a0592c42561f8de09770f400e1ffc421267dbca8c662a97a69e53ff8520.png)
+
 #### CPU
 
  - 485 MHz IBM "Gekko" PowerPC CPU based on the 750CXe and 750FX achieving 1125 DMIPS (Dhrystone 2.1)
