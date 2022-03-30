@@ -6,20 +6,20 @@
 
  - Ubuntu (works with WSL2 too)
  - Dolphin GameCube emulator (https://dolphin-emu.org/)
- - Docker
+ - Docker (see specific installatino for WSL2)
  - [Optional] Visual Code with extensions (https://code.visualstudio.com/download)
    - WSL remote if using WSL2
-   - ...  
+   - C/C++ extensions
 
 ### Installation
 
 From your Ubuntu non-root account:
 
 Retrieve DevkitPro for PPC Docker image. This image contains:
- - cross-compliation toolchain for PPC and ARM
- - standard libraries pre-compiled: libz, libturbojpeg, libpng/u, libvorbis, libogg, linmpg123, libfreetype, libode, libgd
+ - cross-compliation toolchain for PPC (and ARM but not required)
+ - standard libraries pre-compiled: `libz`, `libturbojpeg`, `libpng/u`, `libvorbis`, `libogg`, `linmpg123`, `libfreetype`, `libode`, `libgd`
  - libogc already compiled which also compiles:
-   - libiso9660, libmodplay, libmad, libasnd, libaesnd, libdb, lwip
+   - `libiso9660`, `libmodplay`, `libmad`, `libasnd`, `libaesnd`, `libdb`, `lwip`
 
 ````bash
 sudo docker pull devkitpro/devkitppc
@@ -74,14 +74,25 @@ dkp-pacman -S gamecube-dev
 
 ### Documentation
 
- - libogc: https://libogc.devkitpro.org/
- - GRRLIB: https://grrlib.github.io/GRRLIB/
- - Interesting article on the GAmeCube GX and libogc: https://devkitpro.org/wiki/libogc/GX#Preface
- - Forums: 
-   - https://devkitpro.org/viewforum.php?f=40
-   - http://grrlib.santo.fr/forum/ 
-
+ - General
+   - Detailled architecture analysis: https://www.copetti.org/writings/consoles/gamecube/
+   
+ - devkitPro and libogc: 
+   - docs: https://libogc.devkitpro.org/
+   - examples: https://github.com/devkitPro/gamecube-examples (cloned)
+   - forums: https://devkitpro.org/viewforum.php?f=40
+   - Interesting article on the GameCube GX (GPU) and libogc: https://devkitpro.org/wiki/libogc/GX#Preface
+   
+ - GRRLIB: 
+   - docs: https://grrlib.github.io/GRRLIB/
+   - examples: https://github.com/GRRLIB/GRRLIB/tree/master/examples (cloned)
+   - forums: 
+     - http://grrlib.santo.fr/forum/ (closed, for reference only)
+     - https://github.com/GRRLIB/GRRLIB/discussions
+ 
 ### Installing Docker without Docker Desktop on WSL2
+
+ref: https://dev.to/felipecrs/simply-run-docker-on-wsl2-3o8
 
 ````bash
 sudo apt install --no-install-recommends apt-transport-https ca-certificates curl gnupg2
