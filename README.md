@@ -47,7 +47,7 @@ make
 cd /home/gc/GRRLIB/GRRLIB
 make PLATFORM=cube clean all install
 
-cd /home/gc/GameCube4Fun/examples_gc/template
+cd /home/gc/GameCube4Fun/grrlib/examples_gc/template
 make
 ````
 
