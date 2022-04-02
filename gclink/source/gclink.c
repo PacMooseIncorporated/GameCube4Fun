@@ -1,12 +1,23 @@
+/*
+ * gclink: a network bootloader for the GameCube
+ *
+ * Copyright (c) 2020 TRSi
+ * Written by:
+ *	shazz <shazz@trsi.de>
+ *
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <malloc.h>
 #include <ogcsys.h>
 #include <gccore.h>
 #include <network.h>
 #include <debug.h>
 #include <errno.h>
+#include <ogc/lwp_threads.h>
 
 #include "exi.h"
 #include "sidestep.h"
@@ -14,34 +25,37 @@
 // --------------------------------------------------------------------------------
 //  DECLARATIONS
 //---------------------------------------------------------------------------------
-void * init();
+void * init_console();
+int setup_network_thread();
 void * gclink(void *arg);
-
 int parse_command(int csock, char * packet);
+
+// commands
 int execute_dol(int csock, int size);
 int execute_elf(int csock, int size);
 int say_hello(int csock);
+int reset(bool shutdown);
 
 // --------------------------------------------------------------------------------
 //  GLOBALS
 //---------------------------------------------------------------------------------
-static void *xfb = NULL;
-static GXRModeObj *rmode = NULL;
-
+void * framebuffer = NULL;
 static lwp_t gclink_handle = (lwp_t)NULL;
 
 int PORT = 23;
+bool SHUTDOWN = false;
 const static char gclink_exec_dol[] = "EXECDOL";
 const static char gclink_exec_elf[] = "EXECELF";
 const static char gclink_hello[] = "HELLO";
+const static char gclink_reset[] = "RESET";
 
 
 //---------------------------------------------------------------------------------
 // init
 //---------------------------------------------------------------------------------
-void * init() {
+void * init_console() {
 
-	void *framebuffer;
+	GXRModeObj *rmode;
 
 	VIDEO_Init();
 	PAD_Init();
@@ -52,6 +66,7 @@ void * init() {
 	console_init(framebuffer,20,20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*VI_DISPLAY_PIX_SZ);
 
 	VIDEO_Configure(rmode);
+	VIDEO_ClearFrameBuffer (rmode, framebuffer, COLOR_BLACK);
 	VIDEO_SetNextFramebuffer(framebuffer);
 	VIDEO_SetBlack(FALSE);
 	VIDEO_Flush();
@@ -59,48 +74,67 @@ void * init() {
 
 	if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
 
-	return framebuffer;
+	return 0;
 }
 
 //---------------------------------------------------------------------------------
 // Main
 //---------------------------------------------------------------------------------
-int main(int argc, char **argv) {
+int main() {
 
+	init_console();
+
+	if(exi_bba_exists()) {
+		setup_network_thread();
+	}
+	else {
+        printf("Broadband Adapter not found!\n");
+		printf("Press START to reset!\n");
+    }
+
+	while(1) {
+		VIDEO_WaitVSync();
+		PAD_ScanPads();
+
+		int buttonsDown = PAD_ButtonsDown(0);
+
+		if(buttonsDown & PAD_BUTTON_START) {
+			reset(SHUTDOWN);
+		}
+	}
+
+	return 0;
+}
+
+//---------------------------------------------------------------------------------
+// Create thread to listen on the BBA interface
+//---------------------------------------------------------------------------------
+int setup_network_thread() {
 	s32 ret;
 
 	char localip[16] = {0};
 	char gateway[16] = {0};
 	char netmask[16] = {0};
 
-	xfb = init();
-
 	printf("\ngclink by Shazz/TRSi\n");
 	printf("Configuring network...\n");
 
-    if(exi_bba_exists()) {
+	// Configure the network interface
+	ret = if_config( localip, netmask, gateway, TRUE, 20);
+	if (ret>=0) {
+		printf("Network configured IP: %s, GW: %s, MASK: %s\n", localip, gateway, netmask);
 
-        // Configure the network interface
-        ret = if_config( localip, netmask, gateway, TRUE, 20);
-        if (ret>=0) {
-            printf("Network configured IP: %s, GW: %s, MASK: %s\n", localip, gateway, netmask);
-
-            LWP_CreateThread(	&gclink_handle,	/* thread handle */
-                                gclink,			/* code */
-                                localip,		/* arg pointer for thread */
-                                NULL,			/* stack base */
-                                16*1024,		/* stack size */
-                                50				/* thread priority */ );
-        }
-        else {
-            printf("Network configuration failed!\n");
-			printf("Press START to exit\n");
-        }
-    }
-    else {
-        printf("Broadband Adapter not found!\n");
+		LWP_CreateThread(	&gclink_handle,	/* thread handle */
+							gclink,			/* code */
+							localip,		/* arg pointer for thread */
+							NULL,			/* stack base */
+							16*1024,		/* stack size */
+							50				/* thread priority */ );
+	}
+	else {
+		printf("Network configuration failed!\n");
 		printf("Press START to exit\n");
-    }
+	}
 
 	while(1) {
 
@@ -110,11 +144,14 @@ int main(int argc, char **argv) {
 		int buttonsDown = PAD_ButtonsDown(0);
 
 		if(buttonsDown & PAD_BUTTON_START) {
+			printf("Bye bye!!!\n");
 			exit(0);
 		}
+		else if((buttonsDown & PAD_BUTTON_A) && (buttonsDown & PAD_BUTTON_B) && (buttonsDown & PAD_TRIGGER_R) && (buttonsDown & PAD_TRIGGER_L)) {
+			printf("Reset!!!\n");
+			reset(SHUTDOWN);
+		}
 	}
-
-	return 0;
 }
 
 //---------------------------------------------------------------------------------
@@ -265,6 +302,14 @@ int parse_command(int csock, char * packet) {
         sprintf(response, "HELLO said!");
 		net_send(csock, response, strlen(response), 0);
     }
+	else if(!strncmp(packet, gclink_reset, strlen(gclink_reset))) {
+
+		printf("Resetting gclink!\n");
+		reset(SHUTDOWN);
+
+        sprintf(response, "Reset requested!");
+		net_send(csock, response, strlen(response), 0);
+    }
     else {
         sprintf(response, "Unknown command");
         net_send(csock, response, strlen(response), 0);
@@ -275,7 +320,41 @@ int parse_command(int csock, char * packet) {
 }
 
 //---------------------------------------------------------------------------------
-// HELLO execute command
+// RESET command
+//---------------------------------------------------------------------------------
+int reset(bool shutdown) {
+
+	printf("Reset!\n");
+
+	//TODO: probably kill a few things here!
+	framebuffer = NULL;
+	ARAMClear();
+	GX_AbortFrame();
+
+	if(shutdown) {
+		u32 bi2Addr = *(volatile u32*)0x800000F4;
+		u32 osctxphys = *(volatile u32*)0x800000C0;
+		u32 osctxvirt = *(volatile u32*)0x800000D4;
+
+		// This doesnt look to work as expected...
+		// #define SYS_RESTART					0			/*!< Reboot the gamecube, force, if necessary, to boot the IPL menu. Cold reset is issued */
+		// #define SYS_HOTRESET					1			/*!< Restart the application. Kind of softreset */
+		// #define SYS_SHUTDOWN					2			/*!< Shutdown the thread system, card management system etc. Leave current thread running and return to caller */
+		SYS_ResetSystem(SYS_SHUTDOWN, 0, 0);
+
+		*(volatile u32*)0x800000F4 = bi2Addr;
+		*(volatile u32*)0x800000C0 = osctxphys;
+		*(volatile u32*)0x800000D4 = osctxvirt;
+	}
+
+	// restore thread
+	__lwp_thread_stopmultitasking((void(*)())main());
+
+    return 0;
+}
+
+//---------------------------------------------------------------------------------
+// HELLO command
 //---------------------------------------------------------------------------------
 int say_hello(int csock) {
 
@@ -293,10 +372,17 @@ int execute_dol(int csock, int size) {
     u8 * data = (u8*) memalign(32, size);
     int ret;
 
+	// receive the DOL payload of the given size
     ret = net_recv(csock, data, size, 0);
     printf("Received %d bytes of DOL payload\n", ret);
 
-    ret = DOLtoARAM(data, 0, NULL);
+	if(ret == size) {
+		ret = DOLtoARAM(data, 0, NULL);
+	}
+	else {
+		printf("The payload size doesn't match: %d vs %d\n", size, ret)
+		return 1;
+	}
 
     return ret;
 }
@@ -309,10 +395,17 @@ int execute_elf(int csock, int size) {
     u8 * data = (u8*) memalign(32, size);
     int ret;
 
+	// receive the ELF payload of the given size
     ret = net_recv(csock, data, size, 0);
     printf("Received %d bytes of ELF payload\n", ret);
 
-    ret = ELFtoARAM(data, 0, NULL);
+	if(ret == size) {
+		ret = ELFtoARAM(data, 0, NULL);
+	}
+	else {
+		printf("The payload size doesn't match: %d vs %d\n", size, ret)
+		return 1;
+	}
 
     return ret;
 }

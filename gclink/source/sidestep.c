@@ -178,8 +178,9 @@ void ARAMRun(u32 entrypoint, u32 dst, u32 src, u32 len)
 * ARAMClear
 *
 * To make life easy, just clear out the Auxilliary RAM completely.
+* removed static
 ****************************************************************************/
-static void ARAMClear(void)
+void ARAMClear(void)
 {
   int i;
   unsigned char *buffer = memalign(32, 2048); /*** A little 2k buffer ***/

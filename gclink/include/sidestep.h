@@ -1,11 +1,19 @@
-/****************************************************************************
-* SideStep DOL Loading
-*
-* This module runs a DOL file from Auxilliary RAM. This removes any memory
-* issues which might occur - and also means you can easily overwrite yourself!
-*
-* softdev March 2007
-***************************************************************************/
+/*
+ * gclink: a network bootloader for the GameCube
+ *
+ * Copyright (c) 2020 TRSi
+ * Written by:
+ *	shazz <shazz@trsi.de>
+ *
+ * SideStep DOL Loading
+ *
+ * This module runs a DOL file from Auxilliary RAM. This removes any memory
+ * issues which might occur - and also means you can easily overwrite yourself!
+ *
+ * author: softdev March 2007
+ *
+ */
+
 #ifndef HW_RVL
 #ifndef __SIDESTEP__
 #define __SIDESTEP__
@@ -37,6 +45,7 @@ u32 DOLSize(DOLHEADER *dol);
 int DOLtoARAM(unsigned char *dol, int argc, char *argv[]);
 int ELFtoARAM(unsigned char *elf, int argc, char *argv[]);
 int BINtoARAM(unsigned char *bin, int len, unsigned int entrypoint);
+void ARAMClear(void);
 
 #endif
 #endif
