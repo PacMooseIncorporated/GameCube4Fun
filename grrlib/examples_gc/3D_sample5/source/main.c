@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <math.h>
 #include <malloc.h>
-#include <wiiuse/wpad.h>
 
 #include "gfx/font.h"
 

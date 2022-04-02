@@ -9,7 +9,7 @@
  - Docker (see specific installatino for WSL2)
  - [Optional] Visual Code with extensions (https://code.visualstudio.com/download)
    - WSL remote if using WSL2
-   - C/C++ extensions
+   - C/C++ Extension Pack
 
 ### Installation
 
@@ -38,8 +38,17 @@ git clone https://github.com/PacMooseIncorporated/GameCube4Fun.git
 
 Compile the GRRLIB, GameCube examples (already in devkitPro `/opt/devkitpro/examples/gamecube` in fact)
 
+```text
+libgrrlib          <- 2D/3D graphics library
+├── libfat         <- File I/O
+├── libjpeg        <- JPEG image processor
+├── libpngu        <- Wrapper for libpng
+│   └── libpng     <- PNG image processor
+└── libfreetype    <- TrueType font processor
+```
+
 ````bash
-sudo docker run --rm -it --name devkit -v /projects/gc:/home/gc devkitpro/devkitppc bash
+sudo docker run -it --name devkit -v /projects/gc:/home/gc devkitpro/devkitppc bash
 
 cd /home/gc/gamecube-examples
 make
@@ -82,14 +91,27 @@ dkp-pacman -S gamecube-dev
    - examples: https://github.com/devkitPro/gamecube-examples (cloned)
    - forums: https://devkitpro.org/viewforum.php?f=40
    - Interesting article on the GameCube GX (GPU) and libogc: https://devkitpro.org/wiki/libogc/GX#Preface
-   
+
  - GRRLIB: 
    - docs: https://grrlib.github.io/GRRLIB/
    - examples: https://github.com/GRRLIB/GRRLIB/tree/master/examples (cloned)
    - forums: 
      - http://grrlib.santo.fr/forum/ (closed, for reference only)
      - https://github.com/GRRLIB/GRRLIB/discussions
- 
+
+ - Interesting codebase:
+   - Terri Fried https://github.com/PolyMarsDev/Terri-Fried/tree/master/gamecube/source (CPP, OGG Player)
+   - Cubecraft https://github.com/camthesaxman/cubecraft/ (debug_malloc, keyboard...)
+   - Donut.c https://github.com/AndrewPiroli/Wii-donut.c
+
+ - Technical details:
+   - DOL file format: https://wiibrew.org/wiki/DOL and converter: https://github.com/devkitPro/gamecube-tools/blob/master/elftool/elf2dol.c
+   - Homebrew swiss knife: https://gchomebrew.com/ultimate/
+   - forums:
+     - https://www.gc-forever.com/forums/index.php
+
+
+
 ### Installing Docker without Docker Desktop on WSL2
 
 ref: https://dev.to/felipecrs/simply-run-docker-on-wsl2-3o8
