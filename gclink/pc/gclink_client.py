@@ -47,8 +47,10 @@ def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
     # check file exist and is not empty before connecting
     if not path.is_file():
         raise RuntimeError(f"filename {args.filename} doesn't exist")
-    if '.' not in path.suffix or path.suffix[1:] not in args.command:
-        raise RuntimeError(f"filename {args.filename} doesn't have the required extension")
+
+    if '.' not in path.suffix or path.suffix[1:] != cmd_type:
+        raise RuntimeError(f"filename {args.filename} doesn't have the required extension: {cmd_type}")
+
     if path.stat().st_size == 0:
         raise RuntimeError(f"File size cannot be 0 bytes")
 
