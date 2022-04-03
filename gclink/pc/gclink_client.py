@@ -3,6 +3,8 @@ import ipaddress
 import argparse
 from pathlib import Path
 
+VERSION = "0.1"
+
 def check_port(value):
     ivalue = int(value)
     if ivalue not in range(1, 65536):
@@ -16,16 +18,62 @@ def check_host(value):
             ip = ipaddress.ip_address(value)
         except ValueError:
             raise argparse.ArgumentTypeError(f"{value} is an invalid ip address value")
-    else:
-        print(f"hostname supplied: {value}")
 
     return value
+
+def cmd_reset(socket):
+    # send command
+    s.sendall(b"RESET")
+    data = s.recv(1024)
+
+    # get result status
+    print(f"Received {data!r}")
+    print("Success!")
+
+def cmd_exec(socket, cmd_type):
+
+    cmd_types = {
+        "dol": "EXECDOL",
+        "elf": "EXECELF"
+    }
+    if cmd_type not in cmd_types:
+        raise RuntimeError(f"Unknown type: {cmd_type}")
+
+    if path.stat().st_size == 0:
+        raise RuntimeError(f"File size cannot be 0 bytes")
+
+    # send command
+    cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
+    print(f"Command: {cmd}")
+    s.sendall(cmd.encode("ascii"))
+
+    # get ack
+    data = s.recv(1024)
+    ack = data.decode("ascii")
+
+    # check ack
+    if ack == "OK":
+
+        # send file bytes content
+        with open(str(path), "rb") as f:
+            file_data = f.read()
+            s.sendall(file_data)
+
+            # get result status
+            data = s.recv(1024)
+            ack = data.decode("ascii")
+            if "executed" not in ack:
+                raise RuntimeError("file not sent correctly!")
+
+            print("Success!")
+    else:
+        raise RuntimeError(f"Error! Received: {ack}")
 
 
 if __name__ == '__main__':
 
     # Instantiate the parser
-    parser = argparse.ArgumentParser(description='GCLink client by Shazz/TRSi')
+    parser = argparse.ArgumentParser(description=f'GCLink client v{VERSION} by Shazz/TRSi')
 
     # general arguments
     parser.add_argument('--host', help='GCLink server hostname or ip', required=True, type=check_host)
@@ -49,6 +97,8 @@ if __name__ == '__main__':
     gclink_host = args.host
     gclink_port = args.port
 
+    print(f"GCLink client v{VERSION} by Shazz/TRSi")
+
     if args.command in ['execelf', 'execdol']:
         path = Path(args.filename)
         if not path.is_file():
@@ -62,59 +112,14 @@ if __name__ == '__main__':
         s.connect((gclink_host, gclink_port))
 
         if args.command == "reset":
-            s.sendall(b"RESET")
-            data = s.recv(1024)
-
-            print(f"Received {data!r}")
-            print("Success!")
+            cmd_reset(s)
 
         elif args.command == "execdol":
-            size = path.stat()
-
-            cmd = f"EXECDOL {path.name} {size.st_size}"
-            print(f"Command: {cmd}")
-
-            s.sendall(cmd.encode("ascii"))
-            data = s.recv(1024)
-
-            ack = data.decode("ascii")
-            if ack == "OK":
-                with open(str(path), "rb") as f:
-                    file_data = f.read()
-                    s.sendall(file_data)
-
-                    data = s.recv(1024)
-                    ack = data.decode("ascii")
-                    if ack != "DOL executed":
-                        raise RuntimeError("file not sent correctly!")
-
-                    print("Success!")
-            else:
-                raise RuntimeError(f"Error! Ack received: {ack}")
+            cmd_exec(s, "dol")
 
         elif args.command == "execelf":
-            size = path.stat()
+            cmd_exec(s, "elf")
 
-            cmd = f"EXECELF {path.name} {size.st_size}"
-            print(f"Command: {cmd}")
-
-            s.sendall(cmd.encode("ascii"))
-            data = s.recv(1024)
-
-            ack = data.decode("ascii")
-            if ack == "OK":
-                with open(str(path), "rb") as f:
-                    file_data = f.read()
-                    s.sendall(file_data)
-                    data = s.recv(1024)
-
-                    ack = data.decode("ascii")
-                    if ack != "ELF executed":
-                        raise RuntimeError("file not sent correctly!")
-
-                    print("Success!")
-            else:
-                raise RuntimeError(f"Error! Ack received: {ack}")
 
 
 
