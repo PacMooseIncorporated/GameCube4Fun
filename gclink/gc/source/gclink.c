@@ -42,7 +42,7 @@ int reset(bool shutdown);
 void * framebuffer = NULL;
 static lwp_t gclink_handle = (lwp_t)NULL;
 
-int PORT = 23;
+int PORT = 2323;
 bool SHUTDOWN = false;
 const static char gclink_exec_dol[] = "EXECDOL";
 const static char gclink_exec_elf[] = "EXECELF";
@@ -250,6 +250,10 @@ int parse_command(int csock, char * packet) {
 
 		if(size != 0) {
 			printf("Executing DOL of size %d\n", size);
+
+			sprintf(response, "OK");
+			net_send(csock, response, strlen(response), 0);
+
 			execute_dol(csock, size);
 
 			sprintf(response, "DOL executed");
@@ -282,6 +286,10 @@ int parse_command(int csock, char * packet) {
 		}
 
 		if(size != 0) {
+
+			sprintf(response, "OK");
+			net_send(csock, response, strlen(response), 0);
+
 			printf("Executing ELF of size %d\n", size);
 			execute_elf(csock, size);
 
