@@ -21,16 +21,21 @@ def check_host(value):
 
     return value
 
-def cmd_reset(socket):
-    # send command
-    s.sendall(b"RESET")
-    data = s.recv(1024)
+def cmd_reset(gclink_host, gclink_port):
 
-    # get result status
-    print(f"Received {data!r}")
-    print("Success!")
+    # connect
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((gclink_host, gclink_port))
 
-def cmd_exec(socket, cmd_type):
+        # send command
+        s.sendall(b"RESET")
+        data = s.recv(1024)
+
+        # get result status
+        print(f"Received {data!r}")
+        print("Success!")
+
+def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
 
     cmd_types = {
         "dol": "EXECDOL",
@@ -39,35 +44,44 @@ def cmd_exec(socket, cmd_type):
     if cmd_type not in cmd_types:
         raise RuntimeError(f"Unknown type: {cmd_type}")
 
+    # check file exist and is not empty before connecting
+    if not path.is_file():
+        raise RuntimeError(f"filename {args.filename} doesn't exist")
+    if '.' not in path.suffix or path.suffix[1:] not in args.command:
+        raise RuntimeError(f"filename {args.filename} doesn't have the required extension")
     if path.stat().st_size == 0:
         raise RuntimeError(f"File size cannot be 0 bytes")
 
-    # send command
-    cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
-    print(f"Command: {cmd}")
-    s.sendall(cmd.encode("ascii"))
+    # connect
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((gclink_host, gclink_port))
 
-    # get ack
-    data = s.recv(1024)
-    ack = data.decode("ascii")
+        # send command
+        cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
+        print(f"Command: {cmd}")
+        s.sendall(cmd.encode("ascii"))
 
-    # check ack
-    if ack == "OK":
+        # get ack
+        data = s.recv(1024)
+        ack = data.decode("ascii")
 
-        # send file bytes content
-        with open(str(path), "rb") as f:
-            file_data = f.read()
-            s.sendall(file_data)
+        # check ack
+        if ack == "OK":
 
-            # get result status
-            data = s.recv(1024)
-            ack = data.decode("ascii")
-            if "executed" not in ack:
-                raise RuntimeError("file not sent correctly!")
+            # send file bytes content
+            with open(str(path), "rb") as f:
+                file_data = f.read()
+                s.sendall(file_data)
 
-            print("Success!")
-    else:
-        raise RuntimeError(f"Error! Received: {ack}")
+                # get result status
+                data = s.recv(1024)
+                ack = data.decode("ascii")
+                if "executed" not in ack:
+                    raise RuntimeError("file not sent correctly!")
+
+                print("Success!")
+        else:
+            raise RuntimeError(f"Error! Received: {ack}")
 
 
 if __name__ == '__main__':
@@ -98,27 +112,16 @@ if __name__ == '__main__':
     gclink_port = args.port
 
     print(f"GCLink client v{VERSION} by Shazz/TRSi")
+    print(f"Connecting to GameCube GCLink server at {gclink_host}:{gclink_port}...")
 
-    if args.command in ['execelf', 'execdol']:
-        path = Path(args.filename)
-        if not path.is_file():
-            raise RuntimeError(f"filename {args.filename} doesn't exist")
-        if '.' not in path.suffix or path.suffix[1:] not in args.command:
-            raise RuntimeError(f"filename {args.filename} doesn't have the required extension")
+    if args.command == "reset":
+        cmd_reset(gclink_host, gclink_port)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    elif args.command == "execdol":
+        cmd_exec(gclink_host, gclink_port, "dol", Path(args.filename))
 
-        print(f"Connecting to GameCube GCLink server at {gclink_host}:{gclink_port}...")
-        s.connect((gclink_host, gclink_port))
-
-        if args.command == "reset":
-            cmd_reset(s)
-
-        elif args.command == "execdol":
-            cmd_exec(s, "dol")
-
-        elif args.command == "execelf":
-            cmd_exec(s, "elf")
+    elif args.command == "execelf":
+        cmd_exec(gclink_host, gclink_port, "elf", Path(args.filename))
 
 
 
