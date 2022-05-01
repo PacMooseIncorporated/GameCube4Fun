@@ -100,15 +100,14 @@ void * init_screen() {
 int main() {
 
 	int frames_counter = 0;
-	const DISC_INTERFACE * iface = &__io_gcsd2;
 
 	init_screen();
 
-	printf("\n\nExploit quick boot by Shazz/TRSi\n");
-	printf("Press:\n");
+	printf("\n\nExploit boot loader by Shazz/TRSi\n");
+	printf("Withing 3s, press:\n");
 	printf("[Start] for sd2sp2 (default)\n");
-	printf("[A]     for SD gecko in port A\n");
 	printf("[B]     for SD gecko in port B\n");
+	printf("[A]     for SD gecko in port A\n");
 
 	while(frames_counter <= TIMEOUT) {
 		VIDEO_WaitVSync();
@@ -117,25 +116,34 @@ int main() {
 		int buttonsDown = PAD_ButtonsDown(0);
 
 		if(buttonsDown & PAD_BUTTON_A) {
-			iface = &__io_gcsda;
-			break;
+			if (!load_fat_file(&__io_gcsda, FILENAME)) {
+				printf("Error: Cannot mount fat on sda and load %s!\n", FILENAME);
+				frames_counter = 0;
+			}
 		}
 		else if(buttonsDown & PAD_BUTTON_B) {
-			iface = &__io_gcsdb;
-			break;
+			if (!load_fat_file(&__io_gcsdb, FILENAME)) {
+				printf("Error: Cannot mount fat on sdb and load %s!\n", FILENAME);
+				frames_counter = 0;
+			}
 		}
 		else if(buttonsDown & PAD_BUTTON_START) {
-			iface = &__io_gcsd2;
-			break;
+			if (!load_fat_file(&__io_gcsd2, FILENAME)) {
+				printf("Error: Cannot mount fat on sd2 and load %s!\n", FILENAME);
+				frames_counter = 0;
+			}
 		}
 		frames_counter += 1;
 	}
 
-	if (!load_fat_file(iface, FILENAME)) {
-		printf("Cannot mount fat and find %s!\n", FILENAME);
-		printf("Rebooting in 5s");
-		sleep(5);
-	}
+	// do in order
+	load_fat_file(&__io_gcsd2, FILENAME);
+	load_fat_file(&__io_gcsdb, FILENAME);
+	load_fat_file(&__io_gcsda, FILENAME);
+
+	printf("Error: Cannot mount and find any autoexec.dol, rebooting in 5s!\n");
+	sleep(5);
+	exit(0);
 
 	return 0;
 }
@@ -147,11 +155,12 @@ int load_fat_file(const DISC_INTERFACE *iface, char * filename)
 {
     int res = 1;
 	char label[256];
+	u8 * dol = NULL;
 
 	// mount fat
     printf("Trying to mount fat\n");
     if (fatMountSimple("fat", iface) == false) {
-        kprintf("Couldn't mount fat\n");
+        printf("Error: Couldn't mount fat\n");
         return 0;
     }
 
@@ -173,7 +182,7 @@ int load_fat_file(const DISC_INTERFACE *iface, char * filename)
 		fseek(fp, 0, SEEK_SET);
 
 		if ((size > 0) && (size < (AR_GetSize() - (64 * 1024)))) {
-			u8 *dol = (u8*) memalign(32, size);
+			dol = (u8*) memalign(32, size);
 			if (dol) {
 				fread(dol, 1, size, fp);
 
@@ -183,30 +192,34 @@ int load_fat_file(const DISC_INTERFACE *iface, char * filename)
 				printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
 				printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
 				printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
-
-				// execute DOL
-				DOLtoARAM(dol, 0, NULL);
-
-				//We shouldn't reach this point
-				if (dol != NULL) free(dol);
 			}
 			else {
-				printf("Couldn't allocate memory\n");
+				printf("Error: Couldn't allocate memory\n");
+				res = 0;
 			}
 		}
 		else {
-			printf("DOL is empty or too big to fit in ARAM\n");
+			printf("Error: DOL is empty or too big to fit in ARAM\n");
+			res = 0;
 		}
+		printf("Closing file\n");
 		fclose(fp);
     }
 	else {
-		kprintf("Failed to open file\n");
+		kprintf("Error: Failed to open file\n");
         res = 0;
 	}
 
     printf("Unmounting fat\n");
-    iface = NULL;
 	fatUnmount("fat");
+
+	// execute DOL
+	if (dol != NULL) {
+		DOLtoARAM(dol, 0, NULL);
+
+		//We shouldn't reach this point
+		if (dol != NULL) free(dol);
+	}
 
     return res;
 }
