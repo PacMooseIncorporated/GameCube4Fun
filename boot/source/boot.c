@@ -17,18 +17,18 @@
 #include <gccore.h>
 #include <debug.h>
 #include <errno.h>
-#include <sdcard/gcsd.h>
 #include <unistd.h>
+
+#include <fat.h>
+#include <sdcard/gcsd.h>
 
 #include "exi.h"
 #include "sidestep.h"
-#include "ffshim.h"
-#include "fatfs/ff.h"
 
 // --------------------------------------------------------------------------------
 //  DEFINES
 //---------------------------------------------------------------------------------
-#define FILENAME "/autoexec.dol"
+#define FILENAME "fat:/autoexec.dol"
 #define TIMEOUT 3*60
 
 // --------------------------------------------------------------------------------
@@ -36,12 +36,12 @@
 //---------------------------------------------------------------------------------
 void * init_screen();
 void dol_alloc(int size);
-int load_fat_file(const char * slot_name, const DISC_INTERFACE * iface, char * filename);
+int load_fat_file(const DISC_INTERFACE * iface, char * filename);
 
 // --------------------------------------------------------------------------------
 //  GLOBALS
 //---------------------------------------------------------------------------------
-u8 *dol = NULL;
+
 
 //---------------------------------------------------------------------------------
 // init
@@ -100,7 +100,6 @@ void * init_screen() {
 int main() {
 
 	int frames_counter = 0;
-	char * port = "sd2";
 	const DISC_INTERFACE * iface = &__io_gcsd2;
 
 	init_screen();
@@ -118,37 +117,22 @@ int main() {
 		int buttonsDown = PAD_ButtonsDown(0);
 
 		if(buttonsDown & PAD_BUTTON_A) {
-			port = "sda";
 			iface = &__io_gcsda;
 			break;
 		}
 		else if(buttonsDown & PAD_BUTTON_B) {
-			port = "sdb";
 			iface = &__io_gcsdb;
 			break;
 		}
 		else if(buttonsDown & PAD_BUTTON_START) {
-			port = "sd2";
 			iface = &__io_gcsd2;
 			break;
 		}
 		frames_counter += 1;
 	}
 
-	if (load_fat_file(port, iface, FILENAME) && (dol)) {
-
-			// Print DOL header
-			DOLHEADER *dolhdr = (DOLHEADER*) dol;
-			printf("Loading %s from slot %s\n", FILENAME, port);
-			printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
-			printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
-			printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
-
-			// Copy DOL to ARAM then execute
-			DOLtoARAM(dol, 0, NULL);
-	}
-	else {
-		printf("Cannot mount and find %s on port %s!\n", FILENAME, port);
+	if (!load_fat_file(iface, FILENAME)) {
+		printf("Cannot mount fat and find %s!\n", FILENAME);
 		printf("Rebooting in 5s");
 		sleep(5);
 	}
@@ -159,73 +143,71 @@ int main() {
 //---------------------------------------------------------------------------------
 // Load DOL from fat
 //---------------------------------------------------------------------------------
-int load_fat_file(const char *slot_name, const DISC_INTERFACE *iface_, char * filename)
+int load_fat_file(const DISC_INTERFACE *iface, char * filename)
 {
     int res = 1;
-    FATFS fs;
-    iface = iface_;
-	char name[256];
-	FIL file;
+	char label[256];
 
-    printf("Trying to mount %s\n", slot_name);
-    if (f_mount(&fs, "", 1) != FR_OK)
-    {
-        kprintf("Couldn't mount %s\n", slot_name);
+	// mount fat
+    printf("Trying to mount fat\n");
+    if (fatMountSimple("fat", iface) == false) {
+        kprintf("Couldn't mount fat\n");
         return 0;
     }
 
-    f_getlabel(slot_name, name, NULL);
-    printf("Mounted %s as %s\n", name, slot_name);
+	// get label
+    fatGetVolumeLabel("fat", label);
+    printf("Mounted %s as fat:/\n", label);
 
+	// read file and copy to ARAM
     printf("Reading %s\n", filename);
-    if (f_open(&file, filename, FA_READ) == FR_OK)
-    {
-		size_t size = f_size(&file);
-		UINT _;
+	FILE *fp = fopen(filename, "rb");
+	if (fp) {
+		fseek(fp, 0, SEEK_END);
+		int size = ftell(fp);
 
-		dol_alloc(size);
-		if (dol)
-		{
-			f_read(&file, dol, size, &_);
-			f_close(&file);
+		int mram_size = (SYS_GetArenaHi() - SYS_GetArenaLo());
+		printf("Memory available: %iB\n", mram_size);
+		printf("DOL size is %iB\n", size);
+
+		fseek(fp, 0, SEEK_SET);
+
+		if ((size > 0) && (size < (AR_GetSize() - (64 * 1024)))) {
+			u8 *dol = (u8*) memalign(32, size);
+			if (dol) {
+				fread(dol, 1, size, fp);
+
+				// Print DOL header
+				DOLHEADER *dolhdr = (DOLHEADER*) dol;
+				printf("Loading %s from fat\n", FILENAME);
+				printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
+				printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
+				printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
+
+				// execute DOL
+				DOLtoARAM(dol, 0, NULL);
+
+				//We shouldn't reach this point
+				if (dol != NULL) free(dol);
+			}
+			else {
+				printf("Couldn't allocate memory\n");
+			}
 		}
 		else {
-			kprintf("Failed to allocate memory for file\n");
-			res = 0;
+			printf("DOL is empty or too big to fit in ARAM\n");
 		}
+		fclose(fp);
     }
 	else {
 		kprintf("Failed to open file\n");
         res = 0;
 	}
 
-    printf("Unmounting slot  %s\n", slot_name);
-    iface->shutdown();
+    printf("Unmounting fat\n");
     iface = NULL;
+	fatUnmount("fat");
 
     return res;
 }
 
-//---------------------------------------------------------------------------------
-// Allocate DOL
-//---------------------------------------------------------------------------------
-void dol_alloc(int size) {
-    int mram_size = (SYS_GetArenaHi() - SYS_GetArenaLo());
-
-    printf("Memory available: %iB\n", mram_size);
-    printf("DOL size is %iB\n", size);
-
-    if (size <= 0)
-    {
-        printf("The DOL is empty !\n");
-        return;
-    }
-
-    if (size >= (AR_GetSize() - (64 * 1024)))
-    {
-        printf("DOL size is too big\n");
-        return;
-    }
-
-    dol = (u8 *) memalign(32, size);
-}
