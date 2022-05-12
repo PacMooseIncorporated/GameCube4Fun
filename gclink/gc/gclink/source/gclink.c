@@ -1,7 +1,7 @@
 /*
  * gclink: a network bootloader for the GameCube
  *
- * Copyright (c) 2020 TRSi
+ * Copyright (c) 2022 TRSi
  * Written by:
  *	shazz <shazz@trsi.de>
  *
@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <malloc.h>
 #include <ogcsys.h>
 #include <gccore.h>
@@ -18,14 +19,26 @@
 #include <debug.h>
 #include <errno.h>
 #include <ogc/lwp_threads.h>
+#include <unistd.h>
 
 #include "exi.h"
 #include "sidestep.h"
 
 // --------------------------------------------------------------------------------
+//  DEFINES
+//---------------------------------------------------------------------------------
+#define PORT 2323
+#define BUFFER_SIZE 1460		// MTU size I guess
+
+// from system.h
+// SYS_RESTART	0			/*!< Reboot the gamecube, force, if necessary, to boot the IPL menu. Cold reset is issued */
+// SYS_HOTRESET 1			/*!< Restart the application. Kind of softreset */
+// SYS_SHUTDOWN 2			/*!< Shutdown the thread system, card management system etc. Leave current thread running and return to caller */
+
+// --------------------------------------------------------------------------------
 //  DECLARATIONS
 //---------------------------------------------------------------------------------
-void * init_console();
+void * init_screen();
 int setup_network_thread();
 void * gclink(void *arg);
 int parse_command(int csock, char * packet);
@@ -34,7 +47,7 @@ int parse_command(int csock, char * packet);
 int execute_dol(int csock, int size);
 int execute_elf(int csock, int size);
 int say_hello(int csock);
-int reset(bool shutdown);
+int reset(int syscode);
 
 // --------------------------------------------------------------------------------
 //  GLOBALS
@@ -42,28 +55,47 @@ int reset(bool shutdown);
 void * framebuffer = NULL;
 static lwp_t gclink_handle = (lwp_t)NULL;
 
-int PORT = 2323;
-bool SHUTDOWN = false;
 const static char gclink_exec_dol[] = "EXECDOL";
 const static char gclink_exec_elf[] = "EXECELF";
 const static char gclink_hello[] = "HELLO";
 const static char gclink_reset[] = "RESET";
 
+// stub .s sourced file
+extern u8 stub_bin[];
+extern u32 stub_bin_size;
 
 //---------------------------------------------------------------------------------
 // init
 //---------------------------------------------------------------------------------
-void * init_console() {
+void * init_screen() {
 
 	GXRModeObj *rmode;
 
 	VIDEO_Init();
 	PAD_Init();
 
-	rmode = VIDEO_GetPreferredMode(NULL);
+	switch(VIDEO_GetCurrentTvMode()) {
+		case VI_NTSC:
+			rmode = &TVNtsc480IntDf;
+			break;
+		case VI_PAL:
+			rmode = &TVPal528IntDf;
+			break;
+		case VI_EURGB60:
+		case VI_MPAL:
+			rmode = &TVMpal480IntDf;
+			break;
+		default:
+			rmode = &TVNtsc480IntDf;
+	}
+
+	// rmode = VIDEO_GetPreferredMode(NULL);
 	framebuffer = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
 
-	console_init(framebuffer,20,20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*VI_DISPLAY_PIX_SZ);
+	CON_Init(framebuffer, 20, 20, rmode->fbWidth, rmode->xfbHeight, rmode->fbWidth*VI_DISPLAY_PIX_SZ);
+	CON_EnableGecko(1, true);
+
+	kprintf("USB Gecko traces enabled\n");
 
 	VIDEO_Configure(rmode);
 	VIDEO_ClearFrameBuffer (rmode, framebuffer, COLOR_BLACK);
@@ -74,6 +106,39 @@ void * init_console() {
 
 	if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
 
+	// No stack - we need it all
+	AR_Init(NULL, 0);
+
+	// allow 32mhz exi bus
+	*(volatile unsigned long*)0xcc00643c = 0x00000000;
+	ipl_set_config(6);
+
+	return 0;
+}
+
+//---------------------------------------------------------------------------------
+// Routine to copy Stub reloader in memory
+//---------------------------------------------------------------------------------
+int installStub() {
+
+	printf("Installing reload stub\n");
+	void * dst = (void *) 0x80001800;
+
+	// check it doesn't overload
+	if ( ((u32)dst + stub_bin_size) > 0x80003000) {
+		printf("The Reload stub size is too big: %d bytes, end address: %08X\n", stub_bin_size, ((u32)dst + stub_bin_size));
+		return 1;
+	}
+
+	// Copy LoaderStub to 0x80001800
+	printf("Copying reload stub to memory\n");
+	memcpy(dst, stub_bin, stub_bin_size);
+
+	printf("Invalidate caches\n");
+	// Flush and invalidate cache
+	DCFlushRange(dst, stub_bin_size);
+	ICInvalidateRange(dst, stub_bin_size);
+
 	return 0;
 }
 
@@ -82,27 +147,28 @@ void * init_console() {
 //---------------------------------------------------------------------------------
 int main() {
 
-	init_console();
+	init_screen();
+
+	printf("\n\ngclink server by Shazz/TRSi\n");
 
 	if(exi_bba_exists()) {
 		setup_network_thread();
 	}
 	else {
         printf("Broadband Adapter not found!\n");
-		printf("Press START to reset!\n");
     }
+
+	printf("Press START reset the GameCube\n");
 
 	while(1) {
 		VIDEO_WaitVSync();
 		PAD_ScanPads();
 
-		int buttonsDown = PAD_ButtonsDown(0);
-
-		if(buttonsDown & PAD_BUTTON_START) {
-			reset(SHUTDOWN);
+		if(PAD_ButtonsDown(0) & PAD_BUTTON_START) {
+			printf("Reset!!!\n");
+			reset(SYS_RESTART);
 		}
 	}
-
 	return 0;
 }
 
@@ -116,11 +182,16 @@ int setup_network_thread() {
 	char gateway[16] = {0};
 	char netmask[16] = {0};
 
-	printf("\ngclink by Shazz/TRSi\n");
+	int mram_size = (SYS_GetArenaHi()-SYS_GetArenaLo());
+	int aram_size = (AR_GetSize()-AR_GetBaseAddress());
+
+	printf("Memory Available: [MRAM] %i KB [ARAM] %i KB\n",(mram_size/1024), (aram_size/1024));
+	printf("Largest DOL possible: %i KB\n", mram_size < aram_size ? mram_size/1024:aram_size/1024);
+
 	printf("Configuring network...\n");
 
-	// Configure the network interface
-	ret = if_config( localip, netmask, gateway, TRUE, 20);
+	// Configure the network interface (libogc2 doesn't use timeout)
+	ret = if_config( localip, netmask, gateway, TRUE);
 	if (ret>=0) {
 		printf("Network configured IP: %s, GW: %s, MASK: %s\n", localip, gateway, netmask);
 
@@ -130,28 +201,15 @@ int setup_network_thread() {
 							NULL,			/* stack base */
 							16*1024,		/* stack size */
 							50				/* thread priority */ );
+
+		printf("Server is ready to receive commands!\n");
 	}
 	else {
 		printf("Network configuration failed!\n");
-		printf("Press START to exit\n");
+		return 1;
 	}
 
-	while(1) {
-
-		VIDEO_WaitVSync();
-		PAD_ScanPads();
-
-		int buttonsDown = PAD_ButtonsDown(0);
-
-		if(buttonsDown & PAD_BUTTON_START) {
-			printf("Bye bye!!!\n");
-			exit(0);
-		}
-		else if((buttonsDown & PAD_BUTTON_A) && (buttonsDown & PAD_BUTTON_B) && (buttonsDown & PAD_TRIGGER_R) && (buttonsDown & PAD_TRIGGER_L)) {
-			printf("Reset!!!\n");
-			reset(SHUTDOWN);
-		}
-	}
+	return 0;
 }
 
 //---------------------------------------------------------------------------------
@@ -313,7 +371,7 @@ int parse_command(int csock, char * packet) {
 	else if(!strncmp(packet, gclink_reset, strlen(gclink_reset))) {
 
 		printf("Resetting gclink!\n");
-		reset(SHUTDOWN);
+		reset(SYS_RESTART);
 
         sprintf(response, "Reset requested!");
 		net_send(csock, response, strlen(response), 0);
@@ -327,33 +385,32 @@ int parse_command(int csock, char * packet) {
     return 0;
 }
 
+
 //---------------------------------------------------------------------------------
 // RESET command
 //---------------------------------------------------------------------------------
-int reset(bool shutdown) {
+int reset(int syscode) {
 
-	printf("Reset!\n");
+	printf("Reset with syscode=%d\n", syscode);
+
+	// while finding out how to patch DOL...
+	exit(0);
 
 	//TODO: probably kill a few things here!
 	framebuffer = NULL;
 	ARAMClear();
 	GX_AbortFrame();
 
-	if(shutdown) {
-		u32 bi2Addr = *(volatile u32*)0x800000F4;
-		u32 osctxphys = *(volatile u32*)0x800000C0;
-		u32 osctxvirt = *(volatile u32*)0x800000D4;
+	u32 bi2Addr   = *(volatile u32*)0x800000F4;
+	u32 osctxphys = *(volatile u32*)0x800000C0;
+	u32 osctxvirt = *(volatile u32*)0x800000D4;
 
-		// This doesnt look to work as expected...
-		// #define SYS_RESTART					0			/*!< Reboot the gamecube, force, if necessary, to boot the IPL menu. Cold reset is issued */
-		// #define SYS_HOTRESET					1			/*!< Restart the application. Kind of softreset */
-		// #define SYS_SHUTDOWN					2			/*!< Shutdown the thread system, card management system etc. Leave current thread running and return to caller */
-		SYS_ResetSystem(SYS_SHUTDOWN, 0, 0);
+	// This doesnt look to work as expected...
+	SYS_ResetSystem(syscode, 0, 0);
 
-		*(volatile u32*)0x800000F4 = bi2Addr;
-		*(volatile u32*)0x800000C0 = osctxphys;
-		*(volatile u32*)0x800000D4 = osctxvirt;
-	}
+	*(volatile u32*)0x800000F4 = bi2Addr;
+	*(volatile u32*)0x800000C0 = osctxphys;
+	*(volatile u32*)0x800000D4 = osctxvirt;
 
 	// restore thread
 	__lwp_thread_stopmultitasking((void(*)())main());
@@ -377,20 +434,47 @@ int say_hello(int csock) {
 //---------------------------------------------------------------------------------
 int execute_dol(int csock, int size) {
 
+	// create a buffer and a pointer to the position in this buffer
     u8 * data = (u8*) memalign(32, size);
-    int ret;
+    u8 * data_ptr = data;
+	int ret;
 
-	// receive the DOL payload of the given size
-    ret = net_recv(csock, data, size, 0);
-    printf("Received %d bytes of DOL payload\n", ret);
-
-	if(ret == size) {
-		ret = DOLtoARAM(data, 0, NULL);
-	}
-	else {
-		printf("The payload size doesn't match: %d vs %d\n", size, ret)
+	if(!data) {
+		printf("Failed to allocate memory!!\n");
 		return 1;
 	}
+
+	printf("Receiving file per packet of %i bytes:", BUFFER_SIZE);
+	while(size > BUFFER_SIZE) {
+		ret = net_recv(csock, data_ptr, BUFFER_SIZE, 0);
+		size -= BUFFER_SIZE;
+		data_ptr += BUFFER_SIZE;
+		printf(".");
+	}
+
+	// last packet
+	if(size) {
+		ret = net_recv(csock, data_ptr, size, 0);
+	}
+	printf(". Done!\n");
+
+	// install stub
+	printf("Installing stub\n");
+	ret = installStub();
+	if (ret == 1) {
+		printf("Could not copy the stub loader in RAM\n");
+	}
+
+	// Check DOL header
+	DOLHEADER *dolhdr = (DOLHEADER*) data;
+	printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
+	printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
+	printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
+
+	sleep(10);
+
+	// Copy DOL to ARAM then execute
+	ret = DOLtoARAM(data, 0, NULL);
 
     return ret;
 }
@@ -400,20 +484,39 @@ int execute_dol(int csock, int size) {
 //---------------------------------------------------------------------------------
 int execute_elf(int csock, int size) {
 
+ 	// create a buffer and a pointer to the position in this buffer
     u8 * data = (u8*) memalign(32, size);
-    int ret;
+    u8 * data_ptr = data;
+	int ret;
 
-	// receive the ELF payload of the given size
-    ret = net_recv(csock, data, size, 0);
-    printf("Received %d bytes of ELF payload\n", ret);
-
-	if(ret == size) {
-		ret = ELFtoARAM(data, 0, NULL);
-	}
-	else {
-		printf("The payload size doesn't match: %d vs %d\n", size, ret)
+	if(!data) {
+		printf("Failed to allocate memory!!\n");
 		return 1;
 	}
 
+	printf("Receiving file per packet of %i bytes:", BUFFER_SIZE);
+	while(size > BUFFER_SIZE) {
+		ret = net_recv(csock, data_ptr, BUFFER_SIZE, 0);
+		size -= BUFFER_SIZE;
+		data_ptr += BUFFER_SIZE;
+		printf(".");
+	}
+
+	// last packet
+	if(size) {
+		ret = net_recv(csock, data_ptr, size, 0);
+	}
+	printf(". Done!\n");
+
+	// install stub
+	ret = installStub();
+	if (!ret) {
+		printf("Could not copy the stub loader in RAM\n");
+	}
+
+	// Copy ELF to ARAM then execute
+	ret = ELFtoARAM(data, 0, NULL);
+
     return ret;
 }
+
