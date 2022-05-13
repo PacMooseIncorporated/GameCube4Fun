@@ -36,10 +36,12 @@ int main() {
 
 	PAD_Init();
 
+	// be sure we're going back to the gclink loader
 	atexit(return_to_loader);
+	// resetcallback SYS_SetResetCallback(resetcallback cb);
 
 	xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
-		
+
 	VIDEO_Configure(rmode);
 		
 	VIDEO_SetNextFramebuffer(xfb);
@@ -71,20 +73,8 @@ int main() {
 
 		int buttonsDown = PAD_ButtonsDown(0);
 
-		if (buttonsDown & PAD_BUTTON_START) {
-			printf("atexit(0)\n");
-			atexit(0);
-		}
-		if (buttonsDown & PAD_BUTTON_A) {
-			printf("atexit(return_to_loader)\n");
-			atexit(return_to_loader);
-		}
-		if (buttonsDown & PAD_BUTTON_B) {
-			printf("exit(0)\n");
+		if ((buttonsDown & PAD_BUTTON_START) || (SYS_ResetButtonDown())) {
 			exit(0);
-		}
-		if (buttonsDown & PAD_BUTTON_X) {
-			break;
 		}
 	}
 

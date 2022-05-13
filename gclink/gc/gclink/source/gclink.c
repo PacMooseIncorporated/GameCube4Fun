@@ -471,8 +471,6 @@ int execute_dol(int csock, int size) {
 	printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
 	printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
 
-	sleep(10);
-
 	// Copy DOL to ARAM then execute
 	ret = DOLtoARAM(data, 0, NULL);
 
@@ -510,7 +508,7 @@ int execute_elf(int csock, int size) {
 
 	// install stub
 	ret = installStub();
-	if (!ret) {
+	if (ret == 1) {
 		printf("Could not copy the stub loader in RAM\n");
 	}
 

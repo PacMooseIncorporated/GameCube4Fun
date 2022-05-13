@@ -146,11 +146,8 @@ void pf_main(void)
 
 	for (int chan = 0; chan < EXI_CHANNEL_MAX; chan++, EXIRegs++) {
 		if (pf_mount(&fs) == FR_OK) {
-			pf_load("/AUTOEXEC.DOL");
-			pf_load("/BOOT.DOL");
-			pf_load("/BOOT2.DOL");
-			pf_load("/IGR.DOL");
-			pf_load("/IPL.DOL");
+			pf_load("/GCLINK.DOL");
+			pf_load("/GCLINK/GCLINK.DOL");
 		}
 	}
 }
