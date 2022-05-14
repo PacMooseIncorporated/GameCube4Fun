@@ -65,6 +65,15 @@ extern u8 stub_bin[];
 extern u32 stub_bin_size;
 
 //---------------------------------------------------------------------------------
+// Reset button callbak
+//---------------------------------------------------------------------------------
+static void reset_cb(u32 irq, void* ctx) {
+	printf("Reset button pushed with IRQ %d\n!", irq);
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
+//---------------------------------------------------------------------------------
 // init
 //---------------------------------------------------------------------------------
 void * init_screen() {
@@ -456,7 +465,7 @@ int execute_dol(int csock, int size) {
 	if(size) {
 		ret = net_recv(csock, data_ptr, size, 0);
 	}
-	printf(". Done!\n");
+	printf(".Done!\n");
 
 	// install stub
 	printf("Installing stub\n");
@@ -464,6 +473,7 @@ int execute_dol(int csock, int size) {
 	if (ret == 1) {
 		printf("Could not copy the stub loader in RAM\n");
 	}
+	SYS_SetResetCallback(reset_cb);
 
 	// Check DOL header
 	DOLHEADER *dolhdr = (DOLHEADER*) data;
@@ -504,13 +514,14 @@ int execute_elf(int csock, int size) {
 	if(size) {
 		ret = net_recv(csock, data_ptr, size, 0);
 	}
-	printf(". Done!\n");
+	printf(".Done!\n");
 
 	// install stub
 	ret = installStub();
 	if (ret == 1) {
 		printf("Could not copy the stub loader in RAM\n");
 	}
+	SYS_SetResetCallback(reset_cb);
 
 	// Copy ELF to ARAM then execute
 	ret = ELFtoARAM(data, 0, NULL);

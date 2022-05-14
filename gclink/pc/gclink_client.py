@@ -1,5 +1,6 @@
 import socket
 import ipaddress
+import sys
 import argparse
 from pathlib import Path
 
@@ -55,35 +56,44 @@ def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
         raise RuntimeError(f"File size cannot be 0 bytes")
 
     # connect
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((gclink_host, gclink_port))
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((gclink_host, gclink_port))
 
-        # send command
-        cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
-        print(f"Command: {cmd}")
-        s.sendall(cmd.encode("ascii"))
+            # send command
+            cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
+            print(f"Command: {cmd}")
+            s.sendall(cmd.encode("ascii"))
 
-        # get ack
-        data = s.recv(1024)
-        ack = data.decode("ascii")
+            # get ack
+            s.settimeout(10.0)
+            data = s.recv(1024)
+            ack = data.decode("ascii")
 
-        # check ack
-        if ack == "OK":
+            # check ack
+            if ack == "OK":
 
-            # send file bytes content
-            with open(str(path), "rb") as f:
-                file_data = f.read()
-                s.sendall(file_data)
+                # send file bytes content
+                with open(str(path), "rb") as f:
+                    file_data = f.read()
+                    s.sendall(file_data)
 
-                # get result status
-                data = s.recv(1024)
-                ack = data.decode("ascii")
-                if "executed" not in ack:
-                    raise RuntimeError("file not sent correctly!")
+                    # get result status
+                    data = s.recv(1024)
+                    ack = data.decode("ascii")
+                    if "executed" not in ack:
+                        raise RuntimeError("file not sent correctly!")
 
-                print("Success!")
-        else:
-            raise RuntimeError(f"Error! Received: {ack}")
+                    print("Success!")
+            else:
+                raise RuntimeError(f"Error! Received: {ack}")
+
+    except KeyboardInterrupt:
+        print("Exiting!")
+        sys.exit()
+    except socket.timeout:
+        print("Timeout, exiting!")
+        sys.exit()
 
 
 if __name__ == '__main__':

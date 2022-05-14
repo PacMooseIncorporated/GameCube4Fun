@@ -21,11 +21,16 @@ vu16 keydown;
 vu16 keyup;
 PADStatus pad[4];
 
-static void return_to_loader (void)
-{
+// Callbacks
+static void return_to_loader (void) {
 	printf("Return to loader\n");
   	void (*reload)() = (void(*)()) 0x80001800;
   	reload ();
+}
+
+static void reset_cb(u32 irq, void* ctx) {
+	printf("Reset button pushed with IRQ %d\n!", irq);
+	return_to_loader();
 }
 
 int main() {
@@ -37,8 +42,8 @@ int main() {
 	PAD_Init();
 
 	// be sure we're going back to the gclink loader
-	atexit(return_to_loader);
-	// resetcallback SYS_SetResetCallback(resetcallback cb);
+	// atexit(return_to_loader);
+	SYS_SetResetCallback(reset_cb);
 
 	xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
 
@@ -52,16 +57,16 @@ int main() {
 
 	if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
 
-	console_init(xfb,30,30,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*2);
+	console_init(xfb, 20, 20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*2);
 
 	time_t gc_time;
 	gc_time = time(NULL);
 
 	srand(gc_time);
 
-	printf("testing console\n");
+	printf("\n\nTesting console\n");
 	std::cout << "Hello World" << std::endl;
-	printf("random number is %08x\n",rand());
+	printf("Random number is %08x\n",rand());
 
 	while(1) {
 
@@ -73,12 +78,16 @@ int main() {
 
 		int buttonsDown = PAD_ButtonsDown(0);
 
-		if ((buttonsDown & PAD_BUTTON_START) || (SYS_ResetButtonDown())) {
+		if (buttonsDown & PAD_BUTTON_START) {
+			printf("Existing with specific atexit\n");
+			atexit(return_to_loader);
+			exit(0);
+		}
+		if (buttonsDown & PAD_BUTTON_A) {
+			printf("Existing with exit(0)\n");
 			exit(0);
 		}
 	}
 
 	printf("Bye bye!)\n");
-	return_to_loader();
-
 }

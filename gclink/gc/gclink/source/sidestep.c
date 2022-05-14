@@ -127,7 +127,7 @@ void *ARAMRunStub() {
 	BOOTSTUB stub;
 	char *p;
 	char *s = (char *) ARAMStub;
- 
+
 	/*** Copy ARAMStub to 81300000 ***/
 	if (_dst + _len < 0x81300000) p = (void *) 0x81300000;
 	else p = (void *) 0x80003100;

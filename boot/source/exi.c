@@ -127,7 +127,7 @@ int exi_bba_exists()
 	return exi_get_id(EXI_CHANNEL_0,EXI_DEVICE_2) == EXI_BBA_ID;
 }
 
-unsigned int exi_get_id(int chn, int dev) 
+unsigned int exi_get_id(int chn, int dev)
 {
 	u32 cid = 0;
 	EXI_GetID(chn,dev,&cid);

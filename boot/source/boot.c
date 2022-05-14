@@ -29,6 +29,7 @@
 //  DEFINES
 //---------------------------------------------------------------------------------
 #define FILENAME "fat:/autoexec.dol"
+#define GCLINK "fat:/gclink.dol"
 #define TIMEOUT 3*60
 
 // --------------------------------------------------------------------------------
@@ -108,6 +109,7 @@ int main() {
 	printf("[Start] for sd2sp2 (default)\n");
 	printf("[B]     for SD gecko in port B\n");
 	printf("[A]     for SD gecko in port A\n");
+	printf("[Z]     for gclink on sd2sp2\n");
 
 	while(frames_counter <= TIMEOUT) {
 		VIDEO_WaitVSync();
@@ -133,6 +135,12 @@ int main() {
 				frames_counter = 0;
 			}
 		}
+		else if(buttonsDown & PAD_TRIGGER_Z) {
+			if (!load_fat_file(&__io_gcsd2, GCLINK)) {
+				printf("Error: Cannot mount fat on sd2 and load %s!\n", GCLINK);
+				frames_counter = 0;
+			}
+		}
 		frames_counter += 1;
 	}
 
@@ -140,6 +148,7 @@ int main() {
 	load_fat_file(&__io_gcsd2, FILENAME);
 	load_fat_file(&__io_gcsdb, FILENAME);
 	load_fat_file(&__io_gcsda, FILENAME);
+	load_fat_file(&__io_gcsd2, GCLINK);
 
 	printf("Error: Cannot mount and find any autoexec.dol, rebooting in 5s!\n");
 	sleep(5);
