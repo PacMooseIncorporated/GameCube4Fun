@@ -8,6 +8,12 @@
 #include <math.h>
 
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     int offset1, offset2, offset3, offset4;
     int periode1, periode2, periode3, periode4;
@@ -21,6 +27,7 @@ int main() {
     PADStatus pads[4];
 
     // Initialise the Graphics & Video subsystem
+    SYS_SetResetCallback(reset_cb);     
     GRRLIB_Init();
 
     // Initialise the Wiimotes

@@ -13,6 +13,11 @@
 #include "gfx/logo.h"
 #include "gfx/font.h"
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
 
 int main() {
     int i;
@@ -32,6 +37,7 @@ int main() {
 
     PADStatus pads[4];
 
+    SYS_SetResetCallback(reset_cb);
     GRRLIB_Init();
     PAD_Init();
 

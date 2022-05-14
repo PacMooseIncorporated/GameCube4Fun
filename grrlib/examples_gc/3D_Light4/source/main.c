@@ -9,6 +9,12 @@
 
 #include "Snap_ITC_12.h"
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main(int argc, char **argv) {
     f32 lightx=0.0f;
     PADStatus pads[4];
@@ -19,6 +25,7 @@ int main(int argc, char **argv) {
     GRRLIB_InitTileSet(tex_font, 17, 22, 32);
 
     PAD_Init();
+    SYS_SetResetCallback(reset_cb);    
 
     GRRLIB_SetBackgroundColour(0x40, 0x40, 0x40, 0xFF);
 

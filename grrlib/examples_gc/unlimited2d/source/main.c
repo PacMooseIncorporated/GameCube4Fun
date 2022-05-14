@@ -14,6 +14,12 @@
 #include "gfx/font.h"
 
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     int i;
     int screen_index = 0;
@@ -28,6 +34,7 @@ int main() {
     int nb_screens = 3;
     PADStatus pads[4];
 
+    SYS_SetResetCallback(reset_cb);
     GRRLIB_Init();
     PAD_Init();
 

@@ -126,6 +126,12 @@ signed int Map1Info[51][87] =
   { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
   { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     int startx=0, starty=0;
     int x, y;
@@ -137,6 +143,7 @@ int main() {
     float sinnonameno=0;
     PADStatus pads[4];
 
+    SYS_SetResetCallback(reset_cb);
     GRRLIB_Init();
     GRRLIB_Settings.antialias = false;
 
@@ -158,19 +165,19 @@ int main() {
         }
 
         if((dirx==0) && (diry==0)) {
-            if (pads[0].button & PAD_BUTTON_LEFT) {
-                diry=-4; 
+            if (pads[0].button & PAD_BUTTON_DOWN) {
+                diry=-4;
+                idperso=15;
+            }
+            else if (pads[0].button & PAD_BUTTON_UP) {
+                diry=4;
                 idperso=15;
             }
             else if (pads[0].button & PAD_BUTTON_RIGHT) {
-                diry=4; 
-                idperso=15;
-            }
-            else if (pads[0].button & PAD_BUTTON_DOWN) {
-                dirx=-4; 
+                dirx=-4;
                 idperso=1;
             }
-            else if (pads[0].button & PAD_BUTTON_UP) {
+            else if (pads[0].button & PAD_BUTTON_LEFT) {
                 dirx=4; 
                 idperso=8;
             }                        

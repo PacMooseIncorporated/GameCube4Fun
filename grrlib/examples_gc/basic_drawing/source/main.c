@@ -52,6 +52,12 @@
 
 static u8 CalculateFrameRate();
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     s32 left = 0, top = 0, page = 0, frame = TILE_DOWN + 1;
     u32 wait = TILE_DELAY, direction = TILE_DOWN, direction_new = TILE_DOWN;
@@ -64,6 +70,7 @@ int main() {
     GRRLIB_Init();
 
     PAD_Init();
+    SYS_SetResetCallback(reset_cb);    
     // WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC_IR);
 
     GRRLIB_texImg *tex_test_jpg = GRRLIB_LoadTexture(test_jpg);

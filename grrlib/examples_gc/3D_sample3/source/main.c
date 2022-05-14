@@ -12,6 +12,11 @@
 #include "gfx/font.h"
 #include "gfx/girl.h"
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
 
 int main() {
     float a=0;
@@ -22,6 +27,7 @@ int main() {
 
     GRRLIB_Init();
     PAD_Init();
+    SYS_SetResetCallback(reset_cb);    
 
     GRRLIB_texImg *tex_screen = GRRLIB_CreateEmptyTexture(rmode->fbWidth,rmode->efbHeight);
     GRRLIB_InitTileSet(tex_screen, rmode->fbWidth, 1, 0);

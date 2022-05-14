@@ -9,6 +9,13 @@
 
 #include "gfx/Letter_Gothic_Std_14_Bold.h"
 
+// Callback
+// SYS_SetResetCallback(reset_cb);
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     float l1=0, l2=0;
     float a=0;
@@ -18,10 +25,10 @@ int main() {
     GRRLIB_Init();
     PAD_Init();
 
+    SYS_SetResetCallback(reset_cb);
 
     GRRLIB_texImg *tex_font = GRRLIB_LoadTexture(Letter_Gothic_Std_14_Bold);
     GRRLIB_InitTileSet(tex_font, 11, 24, 32);
-
 
     GRRLIB_Settings.antialias = true;
 

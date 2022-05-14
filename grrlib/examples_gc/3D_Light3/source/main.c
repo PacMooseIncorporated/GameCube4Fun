@@ -8,6 +8,11 @@
 
 #include "gfx/font9x12.h"
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
 
 int main() {
     f32 rot = 0.0f;
@@ -16,6 +21,7 @@ int main() {
 
     GRRLIB_Init();
     PAD_Init();
+    SYS_SetResetCallback(reset_cb);
 
     GRRLIB_texImg *tex_font = GRRLIB_LoadTexture(font9x12);
     GRRLIB_InitTileSet(tex_font, 9, 12, 32);

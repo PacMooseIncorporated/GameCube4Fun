@@ -57,10 +57,17 @@ GRRLIB_texImg *GFX_Smoke;
 GRRLIB_texImg *GFX_Font;
 
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     u8 FPS = 0;
 
     // Init GRRLIB
+    SYS_SetResetCallback(reset_cb);    
     GRRLIB_Init();
 
     PAD_Init();

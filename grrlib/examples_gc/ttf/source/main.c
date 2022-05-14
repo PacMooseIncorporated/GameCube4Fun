@@ -14,11 +14,18 @@
 static u8 CalculateFrameRate();
 static bool ScreenShot();
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main(int argc, char **argv) {
     bool ShowFPS = false;
     PADStatus pads[4];
 
     // Initialise the Graphics & Video subsystem
+    SYS_SetResetCallback(reset_cb);
     GRRLIB_Init();
 
     // Initialise the Wii Remotes

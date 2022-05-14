@@ -12,10 +12,18 @@
 #include "gfx/font1.h"
 
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     u32 paddown;
     s8 page = 0;
     PADStatus pads[4];
+
+    SYS_SetResetCallback(reset_cb);
 
     // Font texture
     GRRLIB_texImg *text_font1 = GRRLIB_LoadTexture(font1);

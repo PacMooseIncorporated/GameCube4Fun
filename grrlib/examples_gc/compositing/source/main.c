@@ -8,6 +8,12 @@
 #include "gfx/font3d.h"
 
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     float rot=0;
     float i;
@@ -15,6 +21,7 @@ int main() {
     const char text[]="GRRLIB ROXX ";
     PADStatus pads[4];
 
+    SYS_SetResetCallback(reset_cb);
     GRRLIB_Init();
     PAD_Init();
 

@@ -26,6 +26,12 @@ GRRLIB_texImg *GFX_Blob[3];
 GRRLIB_texImg *GFX_Font;
 
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     // Init Variables
     u32 PADKeyDown;
@@ -37,6 +43,7 @@ int main() {
     u16 Step = 0;
 
     // Init GRRLIB
+    SYS_SetResetCallback(reset_cb);    
     GRRLIB_Init();
     PAD_Init();
 

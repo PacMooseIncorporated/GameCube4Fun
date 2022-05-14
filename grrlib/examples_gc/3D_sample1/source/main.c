@@ -10,6 +10,12 @@
 
 #include "gfx/font.h"
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     float a=0;
     u32 col[3] = {0xFFFFFFFF, 0xAAAAAAFF, 0x666666FF};
@@ -18,6 +24,7 @@ int main() {
 
     GRRLIB_Init();
     PAD_Init();
+    SYS_SetResetCallback(reset_cb);    
 
     GRRLIB_texImg *tex_font = GRRLIB_LoadTexture(font);
     GRRLIB_InitTileSet(tex_font, 16, 16, 32);

@@ -11,6 +11,12 @@
 
 #include "gfx/logo.h"
 
+// Callback
+static void reset_cb(u32 irq, void* ctx) {
+  	void (*reload)() = (void(*)()) 0x80001800;
+  	reload ();
+}
+
 int main() {
     int i;
     float a=0;
@@ -19,6 +25,7 @@ int main() {
     
     GRRLIB_Init();
     PAD_Init();
+    SYS_SetResetCallback(reset_cb);    
 
     GRRLIB_Settings.antialias = true;
 
