@@ -58,6 +58,7 @@ def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
     # connect
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
             s.connect((gclink_host, gclink_port))
 
             # send command
