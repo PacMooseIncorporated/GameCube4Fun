@@ -20,11 +20,16 @@ vu16 keystate;
 vu16 keydown;
 vu16 keyup;
 PADStatus pad[4];
+bool use_kprintf = true;
+bool use_printf = false;
+
+#define TRACE_PORT 10000
+#define TRACE_IP "192.168.1.53"
 
 // Callbacks
 static void return_to_loader (void) {
 	printf("Return to loader\n");
-	close_udp_socket();
+	close_bba_logging();
 
   	void (*reload)() = (void(*)()) 0x80001800;
   	reload ();
@@ -58,22 +63,23 @@ int main() {
 	console_init(xfb, 20, 20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*2);
 	printf("\n\nTesting console\n");
 
-	// configure BBA and socket
-	if(configure_bba()) {
-		is_connected = open_udp_socket(TRACE_PORT, (char *)TRACE_IP);
-		printf("Socket opened to %s on port %d!\n", TRACE_IP, TRACE_PORT);
-	}
+	if (use_kprintf)
+		printf("Using kprintf\n");
+	else
+		printf("Using bba_printf\n");
+
+	is_connected = setup_bba_logging(TRACE_PORT, TRACE_IP, use_kprintf, use_printf);
+	kprintf("BBA Traces enabled\n");
 
 	time_t gc_time;
 	gc_time = time(NULL);
-
 	srand(gc_time);
 	printf("\nRandom number is %08x\n",rand());
 
 	while(1) {
 
 		gc_time = time(NULL);
-		printf("\x1b[10;0HRTC time is %s     ",ctime(&gc_time));
+		printf("\x1b[12;0HRTC time is %s     ",ctime(&gc_time));
 
 		VIDEO_WaitVSync();
 		PAD_ScanPads();
@@ -87,13 +93,18 @@ int main() {
 			exit(0);
 		}
 		if (buttonsDown & PAD_BUTTON_START) {
-			printf("Existing with exit(0)\n");
+			printf("Exiting with exit(0)\n");
 			exit(0);
 		}
 		if (buttonsDown & PAD_BUTTON_B) {
 			if(is_connected) {
 				printf("Send UDP message\n");
-				bba_printf("\x1b[10;0HRTC time is %s     ", ctime(&gc_time));
+				if (use_kprintf == false && use_printf == false)
+					bba_printf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
+				else if (use_printf)
+					printf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
+				else if (use_kprintf)
+					kprintf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
 			}
 			else
 				printf("No UDP socket established\n");
