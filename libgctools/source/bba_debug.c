@@ -54,12 +54,20 @@ const devoptab_t dotab_stdudp = {
 //---------------------------------------------------------------------------------
 // Configure BBA
 //---------------------------------------------------------------------------------
-int setup_bba_logging(int port, char* ip_address, out_t output, bool keep_existing_out) {
+int setup_bba_logging(int port, char* ip_address, out_t output, bool keep_existing_out, char** bba_config) {
 
 	char localip[16] = {0};
 	char gateway[16] = {0};
 	char netmask[16] = {0};
-	int ret = 1;
+    int ret = 1;
+    bool use_dhcp = TRUE;
+
+    if(bba_config != NULL) {
+        strcpy(localip, bba_config[0]);
+        strcpy(gateway, bba_config[1]);
+        strcpy(netmask, bba_config[2]);
+        use_dhcp = FALSE;
+    }
 
 	// allow 32mhz exi bus
 	*(volatile unsigned long*)0xcc00643c = 0x00000000;
@@ -67,8 +75,8 @@ int setup_bba_logging(int port, char* ip_address, out_t output, bool keep_existi
 
 	if(exi_bba_exists()) {
 
-		printf("Configuring network...\n");
-		ret = if_config( localip, netmask, gateway, TRUE);
+		printf("Configuring network... using DHCP: %s\n", use_dhcp ? "true" : "false");
+		ret = if_config( localip, netmask, gateway, use_dhcp);
 		if(ret < 0) {
 			printf("BBA network stack not configured!\n");
 			return -1;

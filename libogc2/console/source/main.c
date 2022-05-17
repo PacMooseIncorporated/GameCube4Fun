@@ -42,7 +42,7 @@ static void reset_cb(u32 irq, void* ctx) {
 	return_to_loader();
 }
 
-int main() {
+int main(int argc, char *argv[]) {
 
 	int is_connected = 0;
 
@@ -64,6 +64,10 @@ int main() {
 
 	console_init(xfb, 20, 20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*2);
 	printf("\n\nTesting console\n");
+	if(argc != 3) {
+		printf("No IP configuration received as arg, using DHCP");
+		argv = NULL;
+	}
 
 	switch(output) {
 		case KPRINTF:
@@ -77,7 +81,7 @@ int main() {
 			break;
 	}
 
-	is_connected = setup_bba_logging(TRACE_PORT, TRACE_IP, output, keep_console);
+	is_connected = setup_bba_logging(TRACE_PORT, TRACE_IP, output, keep_console, argv);
 	kprintf("BBA Traces enabled\n");
 
 	time_t gc_time;

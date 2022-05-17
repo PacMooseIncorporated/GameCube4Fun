@@ -19,6 +19,7 @@
 #include <debug.h>
 #include <errno.h>
 #include <ogc/lwp_threads.h>
+#include <ogc/usbgecko.h>
 #include <unistd.h>
 
 #include "exi.h"
@@ -29,6 +30,11 @@
 //---------------------------------------------------------------------------------
 #define PORT 2323
 #define BUFFER_SIZE 1460		// MTU size I guess
+#define GECKO_CHANNEL 1
+#define PC_READY 0x80
+#define PC_OK    0x81
+#define GC_READY 0x88
+#define GC_OK    0x89
 
 // from system.h
 // SYS_RESTART	0			/*!< Reboot the gamecube, force, if necessary, to boot the IPL menu. Cold reset is issued */
@@ -40,12 +46,18 @@
 //---------------------------------------------------------------------------------
 void * init_screen();
 int setup_network_thread();
-void * gclink(void *arg);
-int parse_command(int csock, char * packet);
+int setup_gecko_thread();
+
+void * gclink_bba(void *arg);
+void * gclink_gecko(void *arg);
+
+int parse_command(int csock, char * packet, char ** bba_config);
+int run_executable(u8 * data, bool is_dol, char ** bba_config);
+int install_stub();
 
 // commands
-int execute_dol(int csock, int size);
-int execute_elf(int csock, int size);
+int execute_dol(int csock, int size, char ** bba_config);
+int execute_elf(int csock, int size, char ** bba_config);
 int say_hello(int csock);
 int reset(int syscode);
 
@@ -64,6 +76,10 @@ const static char gclink_reset[] = "RESET";
 extern u8 stub_bin[];
 extern u32 stub_bin_size;
 
+char localip[16] = {0};
+char gateway[16] = {0};
+char netmask[16] = {0};
+
 //---------------------------------------------------------------------------------
 // Reset button callbak
 //---------------------------------------------------------------------------------
@@ -72,6 +88,21 @@ static void reset_cb(u32 irq, void* ctx) {
   	void (*reload)() = (void(*)()) 0x80001800;
   	reload ();
 }
+
+//---------------------------------------------------------------------------------
+// Utils
+//--------------------------------------------------------------------------------
+unsigned int convert_int(unsigned int in) {
+  unsigned int out;
+  char *p_in = (char *) &in;
+  char *p_out = (char *) &out;
+  p_out[0] = p_in[3];
+  p_out[1] = p_in[2];
+  p_out[2] = p_in[1];
+  p_out[3] = p_in[0];
+  return out;
+}
+#define __stringify(rn) #rn
 
 //---------------------------------------------------------------------------------
 // init
@@ -126,9 +157,49 @@ void * init_screen() {
 }
 
 //---------------------------------------------------------------------------------
+// Routine to run an ELF or a DOL
+//---------------------------------------------------------------------------------
+int run_executable(u8 * data, bool is_dol, char ** bba_config) {
+
+	int ret = 0;
+	int n = 0;
+
+	// install stub
+	printf("Installing stub\n");
+	ret = install_stub();
+	if (ret == 1) {
+		printf("Could not copy the stub loader in RAM\n");
+	}
+	SYS_SetResetCallback(reset_cb);
+
+	if(bba_config != NULL) {
+		n = 3;
+		printf("Program args: [%s, %s, %s]\n", bba_config[0], bba_config[1], bba_config[2]);
+	}
+
+	if(is_dol) {
+		// Check DOL header
+		DOLHEADER *dolhdr = (DOLHEADER*) data;
+		printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
+		printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
+		printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
+
+		// Copy DOL to ARAM then execute
+		ret = DOLtoARAM(data, n, bba_config);
+	}
+	else {
+		printf("Executing ELF\n");
+		ret = ELFtoARAM(data, n, bba_config);
+	}
+
+	return ret;
+
+}
+
+//---------------------------------------------------------------------------------
 // Routine to copy Stub reloader in memory
 //---------------------------------------------------------------------------------
-int installStub() {
+int install_stub() {
 
 	printf("Installing reload stub\n");
 	void * dst = (void *) 0x80001800;
@@ -156,15 +227,28 @@ int installStub() {
 //---------------------------------------------------------------------------------
 int main() {
 
+	int mram_size = (SYS_GetArenaHi()-SYS_GetArenaLo());
+	int aram_size = (AR_GetSize()-AR_GetBaseAddress());
+
 	init_screen();
 
-	printf("\n\ngclink server by Shazz/TRSi\n");
+	printf("\n\ngclink server by Shazz/TRSi - Version 0.1\n");
+
+	printf("Memory Available: [MRAM] %i KB [ARAM] %i KB\n",(mram_size/1024), (aram_size/1024));
+	printf("Largest DOL possible: %i KB\n", mram_size < aram_size ? mram_size/1024:aram_size/1024);
 
 	if(exi_bba_exists()) {
 		setup_network_thread();
 	}
 	else {
         printf("Broadband Adapter not found!\n");
+    }
+
+	if(usb_isgeckoalive(GECKO_CHANNEL)) {
+		setup_gecko_thread();
+	}
+	else {
+        printf("USB Gecko Adapter not found!\n");
     }
 
 	printf("Press START reset the GameCube\n");
@@ -185,33 +269,21 @@ int main() {
 // Create thread to listen on the BBA interface
 //---------------------------------------------------------------------------------
 int setup_network_thread() {
-	s32 ret;
-
-	char localip[16] = {0};
-	char gateway[16] = {0};
-	char netmask[16] = {0};
-
-	int mram_size = (SYS_GetArenaHi()-SYS_GetArenaLo());
-	int aram_size = (AR_GetSize()-AR_GetBaseAddress());
-
-	printf("Memory Available: [MRAM] %i KB [ARAM] %i KB\n",(mram_size/1024), (aram_size/1024));
-	printf("Largest DOL possible: %i KB\n", mram_size < aram_size ? mram_size/1024:aram_size/1024);
 
 	printf("Configuring network...\n");
 
 	// Configure the network interface (libogc2 doesn't use timeout)
-	ret = if_config( localip, netmask, gateway, TRUE);
-	if (ret>=0) {
+	if (if_config( localip, netmask, gateway, TRUE) >= 0) {
 		printf("Network configured IP: %s, GW: %s, MASK: %s\n", localip, gateway, netmask);
 
-		LWP_CreateThread(	&gclink_handle,	/* thread handle */
-							gclink,			/* code */
-							localip,		/* arg pointer for thread */
-							NULL,			/* stack base */
-							16*1024,		/* stack size */
-							50				/* thread priority */ );
+		LWP_CreateThread(	&gclink_handle,					/* thread handle */
+							gclink_bba,						/* code */
+							NULL,							/* arg pointer for thread */
+							NULL,							/* stack base */
+							16*1024,						/* stack size */
+							50								/* thread priority */ );
 
-		printf("Server is ready to receive commands!\n");
+		printf("BBA Server is ready to receive commands!\n");
 	}
 	else {
 		printf("Network configuration failed!\n");
@@ -222,9 +294,87 @@ int setup_network_thread() {
 }
 
 //---------------------------------------------------------------------------------
-// Thread entry point
+// Create listener on the USB Gecko interface
 //---------------------------------------------------------------------------------
-void * gclink(void *arg) {
+int setup_gecko_thread() {
+
+	LWP_CreateThread(	&gclink_handle,	/* thread handle */
+						gclink_gecko,	/* code */
+						NULL,		/* arg pointer for thread */
+						NULL,			/* stack base */
+						16*1024,		/* stack size */
+						50				/* thread priority */ );
+
+	printf("Gecko Server is ready to receive commands!\n");
+
+	return 0;
+}
+
+//---------------------------------------------------------------------------------
+// Gecko Thread entry point
+//---------------------------------------------------------------------------------
+void * gclink_gecko(void *arg) {
+
+	unsigned char data = GC_READY;
+	unsigned int size = 0;
+	unsigned char* buffer = NULL;
+	unsigned char* pointer = NULL;
+
+	printf("\nSending ready\n");
+	usb_sendbuffer_safe(GECKO_CHANNEL, &data, 1);
+
+	printf("Waiting for connection via USB-Gecko in Slot B ...\n");
+	while((data != PC_READY) && (data != PC_OK)) {
+		usb_recvbuffer_safe(GECKO_CHANNEL, &data, 1);
+	}
+
+	if(data == PC_READY)
+	{
+		printf("Respond with OK\n");
+
+		// Sometimes the PC can fail to receive the byte, this helps
+		usleep(100000);
+		data = GC_OK;
+		usb_sendbuffer_safe(GECKO_CHANNEL, &data,1);
+	}
+
+	printf("Getting DOL info...\n");
+	usb_recvbuffer_safe(GECKO_CHANNEL, &size, 4);
+	size = convert_int(size);
+	printf("Size: %i bytes\n", size);
+
+	printf("Receiving file...\n");
+	buffer = (unsigned char*) memalign(32, size);
+	pointer = buffer;
+
+	if(!buffer) {
+		printf("Failed to allocate memory!!\n");
+	}
+	else {
+		while(size>0xF7D8) {
+			usb_recvbuffer_safe(GECKO_CHANNEL, (void*)pointer, 0xF7D8);
+			size-=0xF7D8;
+			pointer+=0xF7D8;
+		}
+
+		if(size) {
+			usb_recvbuffer_safe(GECKO_CHANNEL, (void*)pointer, size);
+		}
+
+		run_executable((u8 *)buffer, true, NULL);
+
+	// infinite loop for now, would be better to accept more commands...
+	while(1);
+	}
+
+	return NULL;
+}
+
+
+//---------------------------------------------------------------------------------
+// Network Thread entry point
+//---------------------------------------------------------------------------------
+void * gclink_bba(void *arg) {
 
 	int sock, csock;
 	int ret;
@@ -232,6 +382,8 @@ void * gclink(void *arg) {
 	struct sockaddr_in client;
 	struct sockaddr_in server;
 	char temp[1026];
+
+	char * bba_config[3] = {localip, gateway, netmask};
 
 	clientlen = sizeof(client);
 
@@ -274,7 +426,7 @@ void * gclink(void *arg) {
 					ret = net_recv(csock, temp, 1024, 0);
 					printf("Received %d bytes\n", ret);
 
-                    ret = parse_command(csock, temp);
+                    ret = parse_command(csock, temp, bba_config);
 					if (!ret) {
 						printf("Commmand failed!");
 					}
@@ -290,7 +442,7 @@ void * gclink(void *arg) {
 //---------------------------------------------------------------------------------
 // Command Parser
 //---------------------------------------------------------------------------------
-int parse_command(int csock, char * packet) {
+int parse_command(int csock, char * packet, char ** bba_config) {
 
     char response[200];
 
@@ -321,7 +473,7 @@ int parse_command(int csock, char * packet) {
 			sprintf(response, "OK");
 			net_send(csock, response, strlen(response), 0);
 
-			execute_dol(csock, size);
+			execute_dol(csock, size, bba_config);
 
 			sprintf(response, "DOL executed");
 			net_send(csock, response, strlen(response), 0);
@@ -358,7 +510,7 @@ int parse_command(int csock, char * packet) {
 			net_send(csock, response, strlen(response), 0);
 
 			printf("Executing ELF of size %d\n", size);
-			execute_elf(csock, size);
+			execute_elf(csock, size, bba_config);
 
 			sprintf(response, "ELF executed");
 			net_send(csock, response, strlen(response), 0);
@@ -441,12 +593,12 @@ int say_hello(int csock) {
 //---------------------------------------------------------------------------------
 // DOL execute command
 //---------------------------------------------------------------------------------
-int execute_dol(int csock, int size) {
+int execute_dol(int csock, int size, char ** bba_config) {
 
 	// create a buffer and a pointer to the position in this buffer
     u8 * data = (u8*) memalign(32, size);
     u8 * data_ptr = data;
-	int ret;
+	int ret = 0;
 
 	if(!data) {
 		printf("Failed to allocate memory!!\n");
@@ -467,22 +619,7 @@ int execute_dol(int csock, int size) {
 	}
 	printf(".Done!\n");
 
-	// install stub
-	printf("Installing stub\n");
-	ret = installStub();
-	if (ret == 1) {
-		printf("Could not copy the stub loader in RAM\n");
-	}
-	SYS_SetResetCallback(reset_cb);
-
-	// Check DOL header
-	DOLHEADER *dolhdr = (DOLHEADER*) data;
-	printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
-	printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
-	printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
-
-	// Copy DOL to ARAM then execute
-	ret = DOLtoARAM(data, 0, NULL);
+	run_executable(data, true, bba_config);
 
     return ret;
 }
@@ -490,12 +627,12 @@ int execute_dol(int csock, int size) {
 //---------------------------------------------------------------------------------
 // ELF execute command
 //---------------------------------------------------------------------------------
-int execute_elf(int csock, int size) {
+int execute_elf(int csock, int size, char ** bba_config) {
 
  	// create a buffer and a pointer to the position in this buffer
     u8 * data = (u8*) memalign(32, size);
     u8 * data_ptr = data;
-	int ret;
+	int ret = 0;
 
 	if(!data) {
 		printf("Failed to allocate memory!!\n");
@@ -516,15 +653,7 @@ int execute_elf(int csock, int size) {
 	}
 	printf(".Done!\n");
 
-	// install stub
-	ret = installStub();
-	if (ret == 1) {
-		printf("Could not copy the stub loader in RAM\n");
-	}
-	SYS_SetResetCallback(reset_cb);
-
-	// Copy ELF to ARAM then execute
-	ret = ELFtoARAM(data, 0, NULL);
+	run_executable(data, false, bba_config);
 
     return ret;
 }
