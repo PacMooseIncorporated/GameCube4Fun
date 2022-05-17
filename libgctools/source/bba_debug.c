@@ -20,9 +20,10 @@ int netudp_write(struct _reent *r, void *fd, const char *ptr, size_t len);
 //---------------------------------------------------------------------------------
 s32 sock = -1;
 bool devoptab_is_enabled = false;
+const devoptab_t * old_dotab = NULL;
 
 //---------------------------------------------------------------------------------
-//
+// devoptab_t definition for the BBA Logger, write only
 //---------------------------------------------------------------------------------
 const devoptab_t dotab_stdudp = {
     "stdudp",     // device name
@@ -53,7 +54,7 @@ const devoptab_t dotab_stdudp = {
 //---------------------------------------------------------------------------------
 // Configure BBA
 //---------------------------------------------------------------------------------
-int setup_bba_logging(int port, char* ip_address, bool use_kprintf, bool use_printf) {
+int setup_bba_logging(int port, char* ip_address, out_t output, bool keep_existing_out) {
 
 	char localip[16] = {0};
 	char gateway[16] = {0};
@@ -64,7 +65,6 @@ int setup_bba_logging(int port, char* ip_address, bool use_kprintf, bool use_pri
 	*(volatile unsigned long*)0xcc00643c = 0x00000000;
 	ipl_set_config(6);
 
-	printf("Checking BBA\n");
 	if(exi_bba_exists()) {
 
 		printf("Configuring network...\n");
@@ -80,30 +80,61 @@ int setup_bba_logging(int port, char* ip_address, bool use_kprintf, bool use_pri
 		return -1;
 	}
 
-    printf("Creating socket\n");
     // assuming path is a string containing the IP address and not a hostname
     if (open_udp_socket(port, ip_address) < 0)
         return -1;
 
-    if(use_printf || use_kprintf) {
+    if(output == KPRINTF || output == PRINTF) {
 
-        printf("Replacing devoptab_list entries for stdout/stderr\n");
+        if(keep_existing_out) {
+            old_dotab = devoptab_list[STD_OUT];
+        }
 
         // update newlib devoptab_list with this devoptab
-        if(use_printf)
-            devoptab_list[STD_OUT] = &dotab_stdudp;
-        if(use_kprintf)
+        if(output == KPRINTF) {
             devoptab_list[STD_ERR] = &dotab_stdudp;
+            kprintf("[kprintf] BBA traces enabled\n");
+        }
+        else {
+            devoptab_list[STD_OUT] = &dotab_stdudp;
+            printf("[printf] BBA traces enabled\n");
+        }
 
         devoptab_is_enabled = true;
 
-        // Traces tests
-        kprintf("[kprintf] BBA traces enabled\n");
-        printf("[printf] BBA traces enabled\n");
     }
 
 	return 1;
 }
+
+//---------------------------------------------------------------------------------
+// Close UDP Socket
+//---------------------------------------------------------------------------------
+void close_bba_logging() {
+	net_close(sock);
+}
+
+//---------------------------------------------------------------------------------
+// Print on the remote terminal
+//---------------------------------------------------------------------------------
+int bba_printf(const char *fmt, ...) {
+	char temp[1026];
+	va_list ap;
+	int rc;
+
+	va_start(ap, fmt);
+	rc = vsnprintf(temp, sizeof (temp), fmt, ap);
+	va_end(ap);
+
+	net_send(sock, temp, strlen (temp), 0);
+
+	return rc;
+}
+
+
+//---------------------------------------------------------------------------------
+// Internals
+//---------------------------------------------------------------------------------
 
 //---------------------------------------------------------------------------------
 // Create UDP Socket to Trace server
@@ -126,37 +157,11 @@ int open_udp_socket(int port, char * server_ip) {
 		return -1;
 	}
 
-	return 1;
+	return sock;
 }
 
 //---------------------------------------------------------------------------------
-// Close UDP Socket
-//---------------------------------------------------------------------------------
-void close_bba_logging() {
-	net_close(sock);
-}
-
-//---------------------------------------------------------------------------------
-// Print on the remote terminal
-//---------------------------------------------------------------------------------
-int bba_printf (const char *fmt, ...) {
-	char temp[1026];
-	va_list ap;
-	int rc;
-
-	va_start(ap, fmt);
-	rc = vsnprintf(temp, sizeof (temp), fmt, ap);
-	va_end (ap);
-
-	if (net_send(sock, temp, strlen (temp), 0) < 0) {
-		printf("Cannot send UDP packet\n");
-	}
-
-	return rc;
-}
-
-//---------------------------------------------------------------------------------
-//
+// devoptab_t write
 //---------------------------------------------------------------------------------
 int netudp_write(struct _reent *r, void *fd, const char *ptr, size_t len)
 {
@@ -164,6 +169,10 @@ int netudp_write(struct _reent *r, void *fd, const char *ptr, size_t len)
 
     if (!devoptab_is_enabled)
         return -1;
+
+    if(old_dotab != NULL) {
+        old_dotab->write_r(r, fd, ptr, len);
+    }
 
     ret = bba_printf("%s", ptr);
 

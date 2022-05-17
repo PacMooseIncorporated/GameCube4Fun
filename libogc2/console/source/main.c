@@ -9,7 +9,11 @@
 #include <debug.h>
 #include <math.h>
 
-#include "bba_debug.h"
+#include <libgctools.h>
+
+// setting console output
+out_t output = KPRINTF;
+bool keep_console = true;
 
 static void *xfb = NULL;
 
@@ -20,8 +24,6 @@ vu16 keystate;
 vu16 keydown;
 vu16 keyup;
 PADStatus pad[4];
-bool use_kprintf = true;
-bool use_printf = false;
 
 #define TRACE_PORT 10000
 #define TRACE_IP "192.168.1.53"
@@ -63,12 +65,19 @@ int main() {
 	console_init(xfb, 20, 20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*2);
 	printf("\n\nTesting console\n");
 
-	if (use_kprintf)
-		printf("Using kprintf\n");
-	else
-		printf("Using bba_printf\n");
+	switch(output) {
+		case KPRINTF:
+			printf("Using kprintf\n");
+			break;
+		case PRINTF:
+			printf("Using printf\n");
+			break;
+		case BBA_PRINTF:
+			printf("Using bba_printf\n");
+			break;
+	}
 
-	is_connected = setup_bba_logging(TRACE_PORT, TRACE_IP, use_kprintf, use_printf);
+	is_connected = setup_bba_logging(TRACE_PORT, TRACE_IP, output, keep_console);
 	kprintf("BBA Traces enabled\n");
 
 	time_t gc_time;
@@ -99,12 +108,17 @@ int main() {
 		if (buttonsDown & PAD_BUTTON_B) {
 			if(is_connected) {
 				printf("Send UDP message\n");
-				if (use_kprintf == false && use_printf == false)
-					bba_printf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
-				else if (use_printf)
-					printf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
-				else if (use_kprintf)
-					kprintf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
+				switch(output) {
+					case KPRINTF:
+						kprintf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
+						break;
+					case PRINTF:
+						printf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
+						break;
+					case BBA_PRINTF:
+						bba_printf("\x1b[12;0HRTC time is %s     ", ctime(&gc_time));
+						break;
+				}
 			}
 			else
 				printf("No UDP socket established\n");
