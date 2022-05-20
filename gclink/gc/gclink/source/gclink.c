@@ -22,6 +22,9 @@
 #include <ogc/usbgecko.h>
 #include <unistd.h>
 
+#include <fat.h>
+#include <sdcard/gcsd.h>
+
 #include "exi.h"
 #include "sidestep.h"
 
@@ -36,6 +39,9 @@
 #define GC_READY 0x88
 #define GC_OK    0x89
 
+#define SWISS_FILENAME "fat:/autoexec.dol"
+
+
 // from system.h
 // SYS_RESTART	0			/*!< Reboot the gamecube, force, if necessary, to boot the IPL menu. Cold reset is issued */
 // SYS_HOTRESET 1			/*!< Restart the application. Kind of softreset */
@@ -44,22 +50,32 @@
 // --------------------------------------------------------------------------------
 //  DECLARATIONS
 //---------------------------------------------------------------------------------
+typedef struct
+{
+	char localip[16];
+	char gateway[16];
+	char netmask[16];
+} t_bba_config;
+
 void * init_screen();
 int setup_network_thread();
 int setup_gecko_thread();
 
-void * gclink_bba(void *arg);
+void * gclink_bba(t_bba_config * bba_config_struct);
 void * gclink_gecko(void *arg);
 
 int parse_command(int csock, char * packet, char ** bba_config);
 int run_executable(u8 * data, bool is_dol, char ** bba_config);
 int install_stub();
+int load_fat_file(const DISC_INTERFACE * iface, char * filename);
+
 
 // commands
 int execute_dol(int csock, int size, char ** bba_config);
 int execute_elf(int csock, int size, char ** bba_config);
 int say_hello(int csock);
 int reset(int syscode);
+int run_fat_dol(char * filename);
 
 // --------------------------------------------------------------------------------
 //  GLOBALS
@@ -76,9 +92,7 @@ const static char gclink_reset[] = "RESET";
 extern u8 stub_bin[];
 extern u32 stub_bin_size;
 
-char localip[16] = {0};
-char gateway[16] = {0};
-char netmask[16] = {0};
+static t_bba_config bba_config_struct;
 
 //---------------------------------------------------------------------------------
 // Reset button callbak
@@ -112,6 +126,7 @@ void * init_screen() {
 	GXRModeObj *rmode;
 
 	VIDEO_Init();
+	DVD_Init();
 	PAD_Init();
 
 	switch(VIDEO_GetCurrentTvMode()) {
@@ -148,6 +163,9 @@ void * init_screen() {
 
 	// No stack - we need it all
 	AR_Init(NULL, 0);
+	AR_Reset();
+	AR_Init(NULL, 0);
+	ARAMClear();
 
 	// allow 32mhz exi bus
 	*(volatile unsigned long*)0xcc00643c = 0x00000000;
@@ -197,6 +215,83 @@ int run_executable(u8 * data, bool is_dol, char ** bba_config) {
 }
 
 //---------------------------------------------------------------------------------
+// Load DOL from fat
+//---------------------------------------------------------------------------------
+int load_fat_file(const DISC_INTERFACE *iface, char * filename)
+{
+    int res = 1;
+	char label[256];
+	u8 * dol = NULL;
+
+	// mount fat
+    printf("Trying to mount fat\n");
+    if (fatMountSimple("fat", iface) == false) {
+        printf("Error: Couldn't mount fat\n");
+        return 0;
+    }
+
+	// get label
+    fatGetVolumeLabel("fat", label);
+    printf("Mounted %s as fat:/\n", label);
+
+	// read file and copy to ARAM
+    printf("Reading %s\n", filename);
+	FILE *fp = fopen(filename, "rb");
+	if (fp) {
+		fseek(fp, 0, SEEK_END);
+		int size = ftell(fp);
+
+		int mram_size = (SYS_GetArenaHi() - SYS_GetArenaLo());
+		printf("Memory available: %iB\n", mram_size);
+		printf("DOL size is %iB\n", size);
+
+		fseek(fp, 0, SEEK_SET);
+
+		if ((size > 0) && (size < (AR_GetSize() - (64 * 1024)))) {
+			dol = (u8*) memalign(32, size);
+			if (dol) {
+				fread(dol, 1, size, fp);
+
+				// Print DOL header
+				DOLHEADER *dolhdr = (DOLHEADER*) dol;
+				printf("Loading %s from fat\n", filename);
+				printf("DOL Load address: %08X\n", dolhdr->textAddress[0]);
+				printf("DOL Entrypoint: %08X\n", dolhdr->entryPoint);
+				printf("BSS: %08X Size: %iKB\n", dolhdr->bssAddress, (int)((float)dolhdr->bssLength/1024));
+			}
+			else {
+				printf("Error: Couldn't allocate memory\n");
+				res = -1;
+			}
+		}
+		else {
+			printf("Error: DOL is empty or too big to fit in ARAM\n");
+			res = -1;
+		}
+		printf("Closing file\n");
+		fclose(fp);
+    }
+	else {
+		kprintf("Error: Failed to open file\n");
+        res = -1;
+	}
+
+    printf("Unmounting fat\n");
+	fatUnmount("fat");
+
+	// execute DOL
+	if (dol != NULL) {
+		DOLtoARAM(dol, 0, NULL);
+
+		//We shouldn't reach this point
+		if (dol != NULL) free(dol);
+	}
+
+    return res;
+}
+
+
+//---------------------------------------------------------------------------------
 // Routine to copy Stub reloader in memory
 //---------------------------------------------------------------------------------
 int install_stub() {
@@ -227,15 +322,13 @@ int install_stub() {
 //---------------------------------------------------------------------------------
 int main() {
 
-	int mram_size = (SYS_GetArenaHi()-SYS_GetArenaLo());
-	int aram_size = (AR_GetSize()-AR_GetBaseAddress());
-
+	int mram_size = (SYS_GetArenaHi() - SYS_GetArenaLo())/1024;
 	init_screen();
 
-	printf("\n\ngclink server by Shazz/TRSi - Version 0.1\n");
+	printf("\n\ngclink server by Shazz/TRSi - Version 0.2\n");
 
-	printf("Memory Available: [MRAM] %i KB [ARAM] %i KB\n",(mram_size/1024), (aram_size/1024));
-	printf("Largest DOL possible: %i KB\n", mram_size < aram_size ? mram_size/1024:aram_size/1024);
+	printf("Splash RAM Available (MRAM): %i / 24576 KB\n", mram_size);
+	printf("Audio RAM Available: (ARAM): %i / 16384 KB (addr: %#X)\n", AR_GetSize()/1024, AR_GetBaseAddress());
 
 	if(exi_bba_exists()) {
 		setup_network_thread();
@@ -251,7 +344,7 @@ int main() {
         printf("USB Gecko Adapter not found!\n");
     }
 
-	printf("Press START reset the GameCube\n");
+	printf("Press START reset the GameCube or Z for swiss\n");
 
 	while(1) {
 		VIDEO_WaitVSync();
@@ -260,6 +353,12 @@ int main() {
 		if(PAD_ButtonsDown(0) & PAD_BUTTON_START) {
 			printf("Reset!!!\n");
 			reset(SYS_RESTART);
+		}
+		if(PAD_ButtonsDown(0) & PAD_TRIGGER_Z) {
+			printf("Lading swiss from FAT storage\n");
+			load_fat_file(&__io_gcsd2, SWISS_FILENAME);
+			load_fat_file(&__io_gcsdb, SWISS_FILENAME);
+			load_fat_file(&__io_gcsda, SWISS_FILENAME);
 		}
 	}
 	return 0;
@@ -270,15 +369,27 @@ int main() {
 //---------------------------------------------------------------------------------
 int setup_network_thread() {
 
+	// char localip[16] = {0};
+	// char gateway[16] = {0};
+	// char netmask[16] = {0};
+
+	char localip[16] = "192.168.1.230";
+	char gateway[16] = "192.168.1.1";
+	char netmask[16] = "255.255.255.0";
+
 	printf("Configuring network...\n");
 
 	// Configure the network interface (libogc2 doesn't use timeout)
-	if (if_config( localip, netmask, gateway, TRUE) >= 0) {
+	if (if_config( localip, netmask, gateway, FALSE) >= 0) {
 		printf("Network configured IP: %s, GW: %s, MASK: %s\n", localip, gateway, netmask);
+
+		strcpy(bba_config_struct.localip, localip);
+		strcpy(bba_config_struct.gateway, gateway);
+		strcpy(bba_config_struct.netmask, netmask);
 
 		LWP_CreateThread(	&gclink_handle,					/* thread handle */
 							gclink_bba,						/* code */
-							NULL,							/* arg pointer for thread */
+							&bba_config_struct,				/* arg pointer for thread */
 							NULL,							/* stack base */
 							16*1024,						/* stack size */
 							50								/* thread priority */ );
@@ -374,7 +485,7 @@ void * gclink_gecko(void *arg) {
 //---------------------------------------------------------------------------------
 // Network Thread entry point
 //---------------------------------------------------------------------------------
-void * gclink_bba(void *arg) {
+void * gclink_bba(t_bba_config * bba_config_struct) {
 
 	int sock, csock;
 	int ret;
@@ -383,10 +494,9 @@ void * gclink_bba(void *arg) {
 	struct sockaddr_in server;
 	char temp[1026];
 
-	char * bba_config[3] = {localip, gateway, netmask};
+	char * bba_config[3] = {bba_config_struct->localip, bba_config_struct->gateway, bba_config_struct->netmask};
 
 	clientlen = sizeof(client);
-
 	sock = net_socket (AF_INET, SOCK_STREAM, IPPROTO_IP);
 
 	if(sock == INVALID_SOCKET) {
@@ -658,3 +768,13 @@ int execute_elf(int csock, int size, char ** bba_config) {
     return ret;
 }
 
+//---------------------------------------------------------------------------------
+// DOL run for FAT command
+//---------------------------------------------------------------------------------
+int run_fat_dol(char * filename) {
+
+	int ret;
+
+	ret = load_fat_file(&__io_gcsd2, filename);
+	return ret;
+}

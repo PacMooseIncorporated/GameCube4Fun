@@ -20,6 +20,7 @@ BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=  include
+MKISOFS     = xorrisofs
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -33,7 +34,7 @@ LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:=	-ldb -lbba -logc -lm
+LIBS	:=	-ldb -lbba -logc -lfat -lm 
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -98,6 +99,8 @@ export OUTPUT	:=	$(CURDIR)/$(TARGET)
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@$(MKISOFS) -R -J -G iso/eltorito-gcode.hdr -no-emul-boot -eltorito-platform PPC -b gclink.dol -o boot.iso gclink.dol
+
 
 #---------------------------------------------------------------------------------
 clean:
