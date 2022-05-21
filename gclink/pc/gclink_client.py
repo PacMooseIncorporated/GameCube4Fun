@@ -36,11 +36,12 @@ def cmd_reset(gclink_host, gclink_port):
         print(f"Received {data!r}")
         print("Success!")
 
-def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
+def cmd_upload(gclink_host, gclink_port, cmd_type: str, path: Path, dest: str = None):
 
     cmd_types = {
         "dol": "EXECDOL",
-        "elf": "EXECELF"
+        "elf": "EXECELF",
+        "copy_dol": "COPYDOL",
     }
     if cmd_type not in cmd_types:
         raise RuntimeError(f"Unknown type: {cmd_type}")
@@ -49,7 +50,7 @@ def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
     if not path.is_file():
         raise RuntimeError(f"filename {args.filename} doesn't exist")
 
-    if '.' not in path.suffix or path.suffix[1:] != cmd_type:
+    if (cmd_type in ['dol', 'elf']) and ('.' not in path.suffix or path.suffix[1:] != cmd_type):
         raise RuntimeError(f"filename {args.filename} doesn't have the required extension: {cmd_type}")
 
     if path.stat().st_size == 0:
@@ -62,12 +63,16 @@ def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
             s.connect((gclink_host, gclink_port))
 
             # send command
-            cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
+            if cmd_type == "copy_dol":
+                cmd = f"{cmd_types[cmd_type]} {path.name} {dest} {path.stat().st_size}"
+            else:
+                cmd = f"{cmd_types[cmd_type]} {path.name} {path.stat().st_size}"
             print(f"Command: {cmd}")
+
             s.sendall(cmd.encode("ascii"))
 
             # get ack
-            s.settimeout(10.0)
+            s.settimeout(5)
             data = s.recv(1024)
             ack = data.decode("ascii")
 
@@ -82,8 +87,8 @@ def cmd_exec(gclink_host, gclink_port, cmd_type: str, path: Path):
                     # get result status
                     data = s.recv(1024)
                     ack = data.decode("ascii")
-                    if "executed" not in ack:
-                        raise RuntimeError("file not sent correctly!")
+                    if "executed" not in ack or "copied" not in ack :
+                        raise RuntimeError(f"file not sent correctly! Error: {ack}")
 
                     print("Success!")
             else:
@@ -117,6 +122,11 @@ if __name__ == '__main__':
     execelf = subparsers.add_parser('execelf', help='Execute ELF file')
     execelf.add_argument('filename', type=str, help='ELF file to execute')
 
+    # DOL exec command
+    execdol = subparsers.add_parser('copydol', help='Copy DOL file')
+    execdol.add_argument('dest', type=str, help='storage destination', choices=['sd2sp2', 'gecko_a', 'gecko_b'])
+    execdol.add_argument('filename', type=str, help='DOL file to copy')
+
     # RESET command
     reset = subparsers.add_parser('reset', help='Reset GCLink server')
 
@@ -131,10 +141,13 @@ if __name__ == '__main__':
         cmd_reset(gclink_host, gclink_port)
 
     elif args.command == "execdol":
-        cmd_exec(gclink_host, gclink_port, "dol", Path(args.filename))
+        cmd_upload(gclink_host, gclink_port, "dol", Path(args.filename))
 
     elif args.command == "execelf":
-        cmd_exec(gclink_host, gclink_port, "elf", Path(args.filename))
+        cmd_upload(gclink_host, gclink_port, "elf", Path(args.filename))
+
+    elif args.command == "copydol":
+        cmd_upload(gclink_host, gclink_port, "copy_dol", Path(args.filename), args.dest)
 
 
 

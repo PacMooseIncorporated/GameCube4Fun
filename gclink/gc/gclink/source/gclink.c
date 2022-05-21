@@ -31,6 +31,10 @@
 // --------------------------------------------------------------------------------
 //  DEFINES
 //---------------------------------------------------------------------------------
+#define USE_DHCP false
+#define DEFAULT_IP "192.168.1.230"
+#define DEFAULT_GTW "192.168.1.1"
+#define DEFAULT_MASK "255.255.255.0"
 #define PORT 2323
 #define BUFFER_SIZE 1460		// MTU size I guess
 #define GECKO_CHANNEL 1
@@ -40,7 +44,6 @@
 #define GC_OK    0x89
 
 #define SWISS_FILENAME "fat:/autoexec.dol"
-
 
 // from system.h
 // SYS_RESTART	0			/*!< Reboot the gamecube, force, if necessary, to boot the IPL menu. Cold reset is issued */
@@ -57,22 +60,27 @@ typedef struct
 	char netmask[16];
 } t_bba_config;
 
+typedef enum storage {
+    SD2SP2, SDGECKO_A, SDGECKO_B
+} storage_t;
+
 void * init_screen();
 int setup_network_thread();
 int setup_gecko_thread();
 
-void * gclink_bba(t_bba_config * bba_config_struct);
+void * gclink_bba(void *arg);
 void * gclink_gecko(void *arg);
 
 int parse_command(int csock, char * packet, char ** bba_config);
 int run_executable(u8 * data, bool is_dol, char ** bba_config);
 int install_stub();
 int load_fat_file(const DISC_INTERFACE * iface, char * filename);
-
+int copy_fat_file(const DISC_INTERFACE *iface, void * data, u32 size, char * filename);
 
 // commands
 int execute_dol(int csock, int size, char ** bba_config);
 int execute_elf(int csock, int size, char ** bba_config);
+int copy_dol(int csock, int size, char * filename, storage_t dest, char ** bba_config);
 int say_hello(int csock);
 int reset(int syscode);
 int run_fat_dol(char * filename);
@@ -85,6 +93,7 @@ static lwp_t gclink_handle = (lwp_t)NULL;
 
 const static char gclink_exec_dol[] = "EXECDOL";
 const static char gclink_exec_elf[] = "EXECELF";
+const static char gclink_copy_dol[] = "COPYDOL";
 const static char gclink_hello[] = "HELLO";
 const static char gclink_reset[] = "RESET";
 
@@ -98,7 +107,6 @@ static t_bba_config bba_config_struct;
 // Reset button callbak
 //---------------------------------------------------------------------------------
 static void reset_cb(u32 irq, void* ctx) {
-	printf("Reset button pushed with IRQ %d\n!", irq);
   	void (*reload)() = (void(*)()) 0x80001800;
   	reload ();
 }
@@ -148,9 +156,9 @@ void * init_screen() {
 	framebuffer = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
 
 	CON_Init(framebuffer, 20, 20, rmode->fbWidth, rmode->xfbHeight, rmode->fbWidth*VI_DISPLAY_PIX_SZ);
-	CON_EnableGecko(1, true);
 
-	kprintf("USB Gecko traces enabled\n");
+	CON_EnableGecko(1, true);
+	kprintf("USB Gecko traces enabled, hello Gecko!!!\n");
 
 	VIDEO_Configure(rmode);
 	VIDEO_ClearFrameBuffer (rmode, framebuffer, COLOR_BLACK);
@@ -183,12 +191,13 @@ int run_executable(u8 * data, bool is_dol, char ** bba_config) {
 	int n = 0;
 
 	// install stub
-	printf("Installing stub\n");
-	ret = install_stub();
-	if (ret == 1) {
-		printf("Could not copy the stub loader in RAM\n");
-	}
-	SYS_SetResetCallback(reset_cb);
+	// printf("Installing stub\n");
+	// ret = install_stub();
+	// if (ret == 1) {
+	// 	printf("Could not copy the stub loader in RAM\n");
+	// }
+
+	// SYS_SetResetCallback(reset_cb);
 
 	if(bba_config != NULL) {
 		n = 3;
@@ -215,24 +224,59 @@ int run_executable(u8 * data, bool is_dol, char ** bba_config) {
 }
 
 //---------------------------------------------------------------------------------
+// Copy DOL to fat
+//---------------------------------------------------------------------------------
+int copy_fat_file(const DISC_INTERFACE *iface, void * data, u32 size, char * filename) {
+
+	int bytes_written = 0;
+	char target_filename[50];
+
+	// mount fat
+    printf("Mounting fat\n");
+    if (fatMountSimple("fat", iface) == false) {
+        printf("Error: Couldn't mount fat\n");
+        return -1;
+    }
+
+	snprintf(target_filename, sizeof(target_filename), "%s%s", "fat:/", filename);
+
+	// write file
+    printf("Writing  %s\n", target_filename);
+	FILE *fp = fopen(target_filename, "wb");
+	if (fp) {
+		fseek(fp, 0, SEEK_SET);
+		bytes_written = fwrite(data, 1, size, fp);
+		fclose(fp);
+
+		if(bytes_written != size) {
+			printf("Error: Couldn't write file, bytes written: %d expected: %d\n", bytes_written, size);
+			return -1;
+		}
+	}
+	else {
+		printf("Error: Couldn't open file %s for writing\n", target_filename);
+		return -1;
+	}
+
+	printf("Success: file %s was writing on storage\n", target_filename);
+
+	return 1;
+}
+
+//---------------------------------------------------------------------------------
 // Load DOL from fat
 //---------------------------------------------------------------------------------
-int load_fat_file(const DISC_INTERFACE *iface, char * filename)
-{
+int load_fat_file(const DISC_INTERFACE *iface, char * filename) {
+
     int res = 1;
-	char label[256];
 	u8 * dol = NULL;
 
 	// mount fat
-    printf("Trying to mount fat\n");
+    printf("Mounting fat\n");
     if (fatMountSimple("fat", iface) == false) {
         printf("Error: Couldn't mount fat\n");
         return 0;
     }
-
-	// get label
-    fatGetVolumeLabel("fat", label);
-    printf("Mounted %s as fat:/\n", label);
 
 	// read file and copy to ARAM
     printf("Reading %s\n", filename);
@@ -296,7 +340,7 @@ int load_fat_file(const DISC_INTERFACE *iface, char * filename)
 //---------------------------------------------------------------------------------
 int install_stub() {
 
-	printf("Installing reload stub\n");
+	kprintf("Installing reload stub\n");
 	void * dst = (void *) 0x80001800;
 
 	// check it doesn't overload
@@ -306,15 +350,33 @@ int install_stub() {
 	}
 
 	// Copy LoaderStub to 0x80001800
-	printf("Copying reload stub to memory\n");
 	memcpy(dst, stub_bin, stub_bin_size);
 
-	printf("Invalidate caches\n");
 	// Flush and invalidate cache
 	DCFlushRange(dst, stub_bin_size);
 	ICInvalidateRange(dst, stub_bin_size);
 
 	return 0;
+}
+
+void pad_check() {
+
+	PAD_ScanPads();
+
+	if((PAD_ButtonsDown(0) & PAD_BUTTON_START) || SYS_ResetButtonDown()) {
+		printf("Reset!!!\n");
+		reset(SYS_RESTART);
+	}
+	if(PAD_ButtonsDown(0) & PAD_TRIGGER_Z) {
+		printf("Lading swiss from FAT storage\n");
+		load_fat_file(&__io_gcsd2, SWISS_FILENAME);
+		load_fat_file(&__io_gcsdb, SWISS_FILENAME);
+		load_fat_file(&__io_gcsda, SWISS_FILENAME);
+	}
+	if((PAD_ButtonsDown(0) & PAD_BUTTON_A)) {
+		CON_EnableGecko(GECKO_CHANNEL, true);
+		kprintf("Hello Gecko on port %d!!!\n", GECKO_CHANNEL);
+	}
 }
 
 //---------------------------------------------------------------------------------
@@ -325,41 +387,34 @@ int main() {
 	int mram_size = (SYS_GetArenaHi() - SYS_GetArenaLo())/1024;
 	init_screen();
 
-	printf("\n\ngclink server by Shazz/TRSi - Version 0.2\n");
+	printf("\n\ngclink server by Shazz/TRSi - Version 0.5\n");
+
+	install_stub();
+	SYS_SetResetCallback(reset_cb);
 
 	printf("Splash RAM Available (MRAM): %i / 24576 KB\n", mram_size);
 	printf("Audio RAM Available: (ARAM): %i / 16384 KB (addr: %#X)\n", AR_GetSize()/1024, AR_GetBaseAddress());
+	printf("Press START/RESET to reset the GameCube or Z for swiss\n");
+
+	pad_check();
 
 	if(exi_bba_exists()) {
 		setup_network_thread();
 	}
 	else {
         printf("Broadband Adapter not found!\n");
-    }
 
-	if(usb_isgeckoalive(GECKO_CHANNEL)) {
-		setup_gecko_thread();
-	}
-	else {
-        printf("USB Gecko Adapter not found!\n");
+		if(usb_isgeckoalive(GECKO_CHANNEL)) {
+			setup_gecko_thread();
+		}
+		else {
+			printf("USB Gecko Adapter not found!\n");
+		}
     }
-
-	printf("Press START reset the GameCube or Z for swiss\n");
 
 	while(1) {
 		VIDEO_WaitVSync();
-		PAD_ScanPads();
-
-		if(PAD_ButtonsDown(0) & PAD_BUTTON_START) {
-			printf("Reset!!!\n");
-			reset(SYS_RESTART);
-		}
-		if(PAD_ButtonsDown(0) & PAD_TRIGGER_Z) {
-			printf("Lading swiss from FAT storage\n");
-			load_fat_file(&__io_gcsd2, SWISS_FILENAME);
-			load_fat_file(&__io_gcsdb, SWISS_FILENAME);
-			load_fat_file(&__io_gcsda, SWISS_FILENAME);
-		}
+		pad_check();
 	}
 	return 0;
 }
@@ -369,18 +424,20 @@ int main() {
 //---------------------------------------------------------------------------------
 int setup_network_thread() {
 
-	// char localip[16] = {0};
-	// char gateway[16] = {0};
-	// char netmask[16] = {0};
+	char localip[16] = {0};
+	char gateway[16] = {0};
+	char netmask[16] = {0};
 
-	char localip[16] = "192.168.1.230";
-	char gateway[16] = "192.168.1.1";
-	char netmask[16] = "255.255.255.0";
+	if(!USE_DHCP) {
+		strcpy(localip, DEFAULT_IP);
+		strcpy(gateway, DEFAULT_GTW);
+		strcpy(netmask, DEFAULT_MASK);
+	}
 
 	printf("Configuring network...\n");
 
 	// Configure the network interface (libogc2 doesn't use timeout)
-	if (if_config( localip, netmask, gateway, FALSE) >= 0) {
+	if (if_config( localip, netmask, gateway, USE_DHCP) >= 0) {
 		printf("Network configured IP: %s, GW: %s, MASK: %s\n", localip, gateway, netmask);
 
 		strcpy(bba_config_struct.localip, localip);
@@ -389,10 +446,10 @@ int setup_network_thread() {
 
 		LWP_CreateThread(	&gclink_handle,					/* thread handle */
 							gclink_bba,						/* code */
-							&bba_config_struct,				/* arg pointer for thread */
+							(void *)&bba_config_struct,		/* arg pointer for thread */
 							NULL,							/* stack base */
 							16*1024,						/* stack size */
-							50								/* thread priority */ );
+							10								/* thread priority */ );
 
 		printf("BBA Server is ready to receive commands!\n");
 	}
@@ -411,7 +468,7 @@ int setup_gecko_thread() {
 
 	LWP_CreateThread(	&gclink_handle,	/* thread handle */
 						gclink_gecko,	/* code */
-						NULL,		/* arg pointer for thread */
+						NULL,			/* arg pointer for thread */
 						NULL,			/* stack base */
 						16*1024,		/* stack size */
 						50				/* thread priority */ );
@@ -485,7 +542,7 @@ void * gclink_gecko(void *arg) {
 //---------------------------------------------------------------------------------
 // Network Thread entry point
 //---------------------------------------------------------------------------------
-void * gclink_bba(t_bba_config * bba_config_struct) {
+void * gclink_bba(void * arg) {
 
 	int sock, csock;
 	int ret;
@@ -494,6 +551,8 @@ void * gclink_bba(t_bba_config * bba_config_struct) {
 	struct sockaddr_in server;
 	char temp[1026];
 
+	// to avoid incompatible pointer type warning, recast struct pointer from void *
+	t_bba_config * bba_config_struct = (t_bba_config *) arg;
 	char * bba_config[3] = {bba_config_struct->localip, bba_config_struct->gateway, bba_config_struct->netmask};
 
 	clientlen = sizeof(client);
@@ -574,7 +633,7 @@ int parse_command(int csock, char * packet, char ** bba_config) {
 		else {
 			sprintf(response, "Incomplete %s command, missing filename", gclink_exec_dol);
 			net_send(csock, response, strlen(response), 0);
-			return 1;
+			return -1;
 		}
 
 		if(size != 0) {
@@ -591,7 +650,70 @@ int parse_command(int csock, char * packet, char ** bba_config) {
 		else {
 			sprintf(response, "Incomplete %s command, missing size", gclink_exec_dol);
 			net_send(csock, response, strlen(response), 0);
-			return 1;
+			return -1;
+		}
+
+    }
+	else if(!strncmp(packet, gclink_copy_dol, strlen(gclink_copy_dol))) {
+		char filename[50];
+        int size = 0;
+		char * token;
+		char storage[10];
+		storage_t dest;
+
+		token = strtok(&packet[strlen(gclink_exec_dol)], " ");
+		if(token != NULL) {
+
+			// filename
+			sprintf(filename, token);
+
+			// storage
+			token = strtok(NULL, " ");
+			if(token != NULL) {
+				sprintf(storage, token);
+			}
+
+			// size
+			token = strtok(NULL, " ");
+			if(token != NULL) {
+				size = atoi(token);
+			}
+		}
+		else {
+			sprintf(response, "Incomplete %s command, missing filename", gclink_exec_dol);
+			net_send(csock, response, strlen(response), 0);
+			return -1;
+		}
+
+		if(size != 0) {
+
+			printf("Copying DOL of size %d\n", size);
+
+			sprintf(response, "OK");
+			net_send(csock, response, strlen(response), 0);
+
+			if(strncmp(storage, "sd2sp2", 6) == 0)
+				dest = SD2SP2;
+			else if(strncmp(storage, "gecko_a", 7) == 0)
+				dest = SDGECKO_A;
+			else if(strncmp(storage, "gecko_b", 7)  == 0)
+				dest = SDGECKO_B;
+			else {
+				sprintf(response, "Unknown storage %s", storage);
+				net_send(csock, response, strlen(response), 0);
+				return -1;
+			}
+
+			printf("DOL %s of size %d received, ready to be copied on %s\n", filename, size, storage);
+			copy_dol(csock, size, filename, dest, bba_config);
+
+			sprintf(response, "DOL copied");
+			net_send(csock, response, strlen(response), 0);
+		}
+		else {
+			sprintf(response, "Incomplete %s command, missing size", gclink_exec_dol);
+			net_send(csock, response, strlen(response), 0);
+			return -1;
 		}
 
     }
@@ -611,7 +733,7 @@ int parse_command(int csock, char * packet, char ** bba_config) {
 		else {
 			sprintf(response, "Incomplete %s command, missing filename", gclink_exec_dol);
 			net_send(csock, response, strlen(response), 0);
-			return 1;
+			return -1;
 		}
 
 		if(size != 0) {
@@ -628,7 +750,7 @@ int parse_command(int csock, char * packet, char ** bba_config) {
 		else {
 			sprintf(response, "Incomplete %s command, missing size", gclink_exec_elf);
 			net_send(csock, response, strlen(response), 0);
-			return 1;
+			return -1;
 		}
     }
 	else if(!strncmp(packet, gclink_hello, strlen(gclink_hello))) {
@@ -650,10 +772,10 @@ int parse_command(int csock, char * packet, char ** bba_config) {
     else {
         sprintf(response, "Unknown command");
         net_send(csock, response, strlen(response), 0);
-		return 1;
+		return -1;
     }
 
-    return 0;
+    return 1;
 }
 
 
@@ -686,7 +808,7 @@ int reset(int syscode) {
 	// restore thread
 	__lwp_thread_stopmultitasking((void(*)())main());
 
-    return 0;
+    return 1;
 }
 
 //---------------------------------------------------------------------------------
@@ -697,7 +819,60 @@ int say_hello(int csock) {
 	char * response = "OLLEH";
 	net_send(csock, response, strlen(response), 0);
 
-    return 0;
+    return 1;
+}
+
+//---------------------------------------------------------------------------------
+// DOL copy command
+//---------------------------------------------------------------------------------
+int copy_dol(int csock, int size, char * filename, storage_t dest, char ** bba_config) {
+
+	// create a buffer and a pointer to the position in this buffer
+    u8 * data = (u8*) memalign(32, size);
+    u8 * data_ptr = data;
+	int ret = 0;
+	int received_size = size;
+
+	if(!data) {
+		printf("Failed to allocate memory!!\n");
+		return -1;
+	}
+
+	printf("Receiving file of size %d per packet of %i bytes:", size, BUFFER_SIZE);
+	while(received_size > BUFFER_SIZE) {
+		ret = net_recv(csock, data_ptr, BUFFER_SIZE, 0);
+		received_size -= BUFFER_SIZE;
+		data_ptr += BUFFER_SIZE;
+		printf(".");
+	}
+
+	// last packet
+	if(received_size) {
+		ret = net_recv(csock, data_ptr, received_size, 0);
+	}
+
+	printf(".Done!\n");
+	printf("Starting copy of file %s and size %d to %d\n", filename, size, dest);
+
+	switch(dest) {
+		case SD2SP2:
+			printf("Copying file %s of size %d to sd2sp2\n", filename, size);
+			ret = copy_fat_file(&__io_gcsd2, (void *) data, size, filename);
+			break;
+		case SDGECKO_A:
+			printf("Copying file %s of size %d to port A\n", filename, size);
+			ret = copy_fat_file(&__io_gcsda, (void *) data, size, filename);
+			break;
+		case SDGECKO_B:
+			printf("Copying file %s of size %d to port B\n", filename, size);
+			ret = copy_fat_file(&__io_gcsdb, (void *) data, size, filename);
+			break;
+		default :
+			printf("Unknow storage port: %d\n", dest);
+			return -1;
+	}
+
+    return ret;
 }
 
 //---------------------------------------------------------------------------------
@@ -712,7 +887,7 @@ int execute_dol(int csock, int size, char ** bba_config) {
 
 	if(!data) {
 		printf("Failed to allocate memory!!\n");
-		return 1;
+		return -1;
 	}
 
 	printf("Receiving file per packet of %i bytes:", BUFFER_SIZE);
@@ -742,11 +917,11 @@ int execute_elf(int csock, int size, char ** bba_config) {
  	// create a buffer and a pointer to the position in this buffer
     u8 * data = (u8*) memalign(32, size);
     u8 * data_ptr = data;
-	int ret = 0;
+	int ret = 1;
 
 	if(!data) {
 		printf("Failed to allocate memory!!\n");
-		return 1;
+		return -1;
 	}
 
 	printf("Receiving file per packet of %i bytes:", BUFFER_SIZE);
