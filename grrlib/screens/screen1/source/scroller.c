@@ -12,6 +12,8 @@ float t = 0;
 
 t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u32 x, u32 y, char * text, bool apply_sin, int sin_factor, float sin_speed) {
 
+    GRRLIB_FlushTex(font);
+
     t_scroller * scroller = malloc(sizeof(t_scroller));
     scroller->speed = speed;
     scroller->x = x;
