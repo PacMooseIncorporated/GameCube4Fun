@@ -12,18 +12,23 @@
 #include "font3d_png.h"
 #include "scroller.h"
 
-// include mod
-#include "cream_of_the_earth_mod.h"
-
 #include "intro.h"
 #include "scene.h"
 
 #define BBA_DEBUG false
 #define TRACE_PORT 10000
 #define TRACE_IP "192.168.1.53"
-#define MOD_VOLUME 60
 
-// Callback
+// include mod
+//#define USE_MOD
+#ifdef USE_MOD
+#include "cream_of_the_earth_mod.h"
+#define MOD_VOLUME 60
+#endif
+
+//--------------------------------------------------------------------------------
+// Debug callbacks
+//--------------------------------------------------------------------------------
 static void return_to_loader (void) {
     return_to_gclink("fat:/gclink.dol");
   	void (*reload)() = (void(*)()) 0x80001800;
@@ -34,6 +39,9 @@ static void reset_cb(u32 irq, void* ctx) {
   	return_to_loader();
 }
 
+//--------------------------------------------------------------------------------
+// Main
+//--------------------------------------------------------------------------------
 int main(int argc, char *argv[]) {
 
     // debug
@@ -48,11 +56,14 @@ int main(int argc, char *argv[]) {
     SYS_SetResetCallback(reset_cb);
     atexit(return_to_loader);
 
+    // Init
     GRRLIB_Init();
+#ifdef USE_MOD
     GRRMOD_Init(true);
     GRRMOD_SetMOD((u8 *)cream_of_the_earth_mod, cream_of_the_earth_mod_size);
     GRRMOD_SetVolume(MOD_VOLUME, MOD_VOLUME);
     GRRMOD_Start();
+#endif
 
     PAD_Init();
 
@@ -66,9 +77,11 @@ int main(int argc, char *argv[]) {
     intro_scene->exit = &screen_exit;
     intro_scene->is_enabled = &screen_enabled;
 
+    // Setup scene
     intro_scene->init();
     intro_scene->setup();
 
+    // Render forever
     while(intro_scene->is_enabled() == false) {
         intro_scene->render();
         intro_scene->update();
@@ -76,10 +89,14 @@ int main(int argc, char *argv[]) {
     }
 
     // free stuff
+#ifdef USE_MOD
     GRRMOD_Unload();
     GRRMOD_End();
+#endif
 
     GRRLIB_Exit(); // Be a good boy, clear the memory allocated by GRRLIB
+
+    // go back to loader
     return_to_gclink("fat:/gclink.dol");
 
     exit(0);

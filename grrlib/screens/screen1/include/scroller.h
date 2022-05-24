@@ -1,3 +1,6 @@
+#ifndef __SCROLLER_H
+#define __SCROLLER_H
+
 #include <grrlib.h>
 
 typedef struct letter {
@@ -9,9 +12,6 @@ typedef struct letter {
 typedef struct scroller {
     int speed;
     int interspace;
-    bool apply_sin;
-    int sin_factor;
-    float sin_speed;
     int x;
     int y;
     int x_min_limit;
@@ -23,7 +23,9 @@ typedef struct scroller {
 
 } t_scroller;
 
-t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u32 x, u32 y, char * text, bool apply_sin, int sin_factor, float sin_speed);
-void display_scroll(t_scroller * scroller);
+t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u32 x, u32 y, char * text);
+void render_scroll(t_scroller * scroller);
 void update_scroll(t_scroller * scroller);
 void free_scroller(t_scroller * scroller);
+
+#endif /* __SCROLLER_H */

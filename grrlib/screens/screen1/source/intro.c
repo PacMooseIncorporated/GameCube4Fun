@@ -14,14 +14,11 @@
 #include "intro.h"
 
 #define TEXT "       TRSI IS BACK AGAIN WITH A NEW INTRO FOR THE GAMECUBE!!!! HI TO ALL MY TRSI FRIENDS!  "
-#define SCROLL_SPEED 6
+#define SCROLL_SPEED 8
 #define SCROLL_INTERLACE 10
-#define APPLY_SIN true
-#define SIN_FACTOR 20
-#define SIN_SPEED 0.5
 
 bool time_to_exit = false;
-float a;
+float rot;
 u32 col[3] = {0xFFFFFFFF, 0xAAAAAAFF, 0x666666FF};
 int cubeZ;
 int cubeY;
@@ -30,9 +27,10 @@ float sinx=0;
 GRRLIB_texImg * logo_background;
 GRRLIB_texImg * text_font;
 GRRLIB_texImg * scroll_font;
-GRRLIB_texImg * tex_screen1;
-GRRLIB_texImg * tex_screen2;
-GRRLIB_texImg * tex_screen3;
+GRRLIB_texImg * off_scroller;
+GRRLIB_texImg * off_mirror;
+GRRLIB_texImg * off_3d;
+GRRLIB_texImg * off_sine;
 
 int alpha = 1;
 int alpha_dir = 1;
@@ -43,6 +41,12 @@ t_scroller * scroller;
 bool show_cube = true;
 bool show_scroller = true;
 bool show_mirror_wave  = true;
+bool show_mirror  = true;
+
+#define SIN_PERIOD 2
+#define SIN_INCR 0.05
+#define SIN_FACTOR 20
+float sin_t = 0;
 
 //---------------------------------------------------------------------------------
 // patch to fix buggy GRRLIB
@@ -77,35 +81,46 @@ bool screen_enabled(void){
 void screen_init(void) {
 
     // 3D
-    a=0;
-    cubeZ=0;
-    cubeY=3;
-    sinx=0;
-
-    // texture2screen
-    tex_screen1 = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 100 /*rmode->efbHeight*/);
-    tex_screen2 = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 100);
-    tex_screen3 = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 200);
+    rot = 0;
+    cubeZ = 0;
+    cubeY = 3;
+    sinx = 0;
 
     // Load textures
     logo_background = GRRLIB_LoadTexturePNG(logo_png);
-    text_font = GRRLIB_LoadTexture(font_png);
-    scroll_font = GRRLIB_LoadTexture(font3d_png);
 
-    // Tilesets
+    // small font tileset
+    text_font = GRRLIB_LoadTexture(font_png);
     GRRLIB_InitTileSet(text_font, 16, 16, 32);
+
+    // scroller font tileset
+    scroll_font = GRRLIB_LoadTexture(font3d_png);
     GRRLIB_InitTileSet(scroll_font, 64, 64, 32);
-    GRRLIB_InitTileSet(tex_screen2, rmode->fbWidth, 1, 0);
-    GRRLIB_InitTileSet(tex_screen3, rmode->fbWidth, 1, 0);
+
+    // scroller offscreen texture
+    off_scroller = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 64);
+    GRRLIB_InitTileSet(off_scroller, 1, 64, 0);
+
+    // scroller sinewave offscreen texture
+    off_sine = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 128);
+
+    // scroller mirror offscreen texture
+    off_mirror = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 128);
+    GRRLIB_InitTileSet(off_mirror, rmode->fbWidth, 1, 0);
+
+    // 3D distort offscreen texture
+    off_3d = GRRLIB_CreateEmptyTexture(rmode->fbWidth, 200);
+    GRRLIB_InitTileSet(off_3d, rmode->fbWidth, 1, 0);
 
     // Scroller
-    scroller = create_scroller(scroll_font, SCROLL_SPEED, SCROLL_INTERLACE, 0, 20, text, APPLY_SIN, SIN_FACTOR, SIN_SPEED);
+    scroller = create_scroller(scroll_font, SCROLL_SPEED, SCROLL_INTERLACE, 0, 0, text);
 }
 
 //---------------------------------------------------------------------------------
 // Setup before rendering
 //---------------------------------------------------------------------------------
 void screen_setup() {
+
     GRRLIB_Settings.antialias = true;
 
     GRRLIB_SetBackgroundColour(0x00, 0x00, 0x00, 0xFF);
@@ -120,15 +135,16 @@ void screen_exit() {
     GRRLIB_FreeTexture(text_font);
     GRRLIB_FreeTexture(scroll_font);
     GRRLIB_FreeTexture(logo_background);
-    GRRLIB_FreeTexture(tex_screen1);
-    GRRLIB_FreeTexture(tex_screen2);
-    GRRLIB_FreeTexture(tex_screen3);
+    GRRLIB_FreeTexture(off_scroller);
+    GRRLIB_FreeTexture(off_mirror);
+    GRRLIB_FreeTexture(off_3d);
 }
 
 //---------------------------------------------------------------------------------
 // Joystick events
 //--------------------------------------------------------------------------------
-void screen_events(){
+void screen_events() {
+
     // process events
     PAD_ScanPads();
     if (PAD_ButtonsDown(0) & PAD_BUTTON_START) {
@@ -145,6 +161,9 @@ void screen_events(){
     }
     else if (PAD_ButtonsDown(0) & PAD_BUTTON_B) {
         show_scroller = !show_scroller;
+    }
+    else if (PAD_ButtonsDown(0) & PAD_BUTTON_Y) {
+        show_mirror = !show_mirror;
     }
     else if (PAD_ButtonsDown(0) & PAD_BUTTON_X) {
         show_mirror_wave = !show_mirror_wave;
@@ -169,17 +188,16 @@ void screen_update(void) {
         alpha_dir = -alpha_dir;
     alpha += alpha_dir;
 
-    // cube rotation
-    a+=0.5f;
+    // 3D rotation
+    rot += 0.5f;
+    // distort (cube and mirror)
+    sinx += 0.02f;
 
     // scroller update
     update_scroll(scroller);
-
-    // distort (cube and mirror)
-    sinx += 0.02f;
 }
 
-//---------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------
 // Render
 //--------------------------------------------------------------------------------
 void screen_render(void) {
@@ -187,13 +205,17 @@ void screen_render(void) {
     // Resetting Vars
     GRRLIB_SetBlend(GRRLIB_BLEND_ALPHA);
 
+    // ******************************************
+    // Offscreen rendering
+    // ******************************************
+
     // Render the cube in a render target
     if(show_cube == true) {
         CompoStart();
         {
             // Switch To 3D Mode
             GRRLIB_3dMode(0.1, 1000, 45, 0, 0);
-            GRRLIB_ObjectView(0, cubeY, cubeZ, a,a*2,a*3,1,1,1);
+            GRRLIB_ObjectView(0, cubeY, cubeZ, rot,rot*2,rot*3,1,1,1);
             GX_Begin(GX_QUADS, GX_VTXFMT0, 24);
             {
                 GX_Position3f32(-1.0f,1.0f,-1.0f);
@@ -252,20 +274,48 @@ void screen_render(void) {
             }
             GX_End();
         }
-        CompoEnd(0, 0, tex_screen3);
+        CompoEnd(0, 0, off_3d);
+    }
+    else {
+        CompoStart();
+        {
+            // Switch To 3D Mode
+            GRRLIB_3dMode(0.1, 1000, 45, 0, 1);
+            GRRLIB_ObjectView(0,0,0, rot,rot*2,rot*3,1,1,1);
+            GRRLIB_DrawTorus(1, 2, 60, 60, true, 0xFFFFFFFF);
+        }
+        CompoEnd(0, 0, off_3d);
     }
 
     // Switch To 2D Mode to display text and background
     GRRLIB_2dMode();
 
-    // render scroller in a render target
+    // render scroller offscreen
     if(show_scroller == true) {
+
         CompoStart();
         {
-            display_scroll(scroller);
+            render_scroll(scroller);
         }
-        CompoEnd(0, 0, tex_screen1);
+        CompoEnd(0, 0, off_scroller);
+
+        // apply distort on horizontal scroller offscreen
+        CompoStart();
+        {
+            sin_t += SIN_INCR;
+            // blit scroller by row
+            for(int j=0; j < rmode->fbWidth; j++) {
+                float y_sin = sin((sin_t + j* SIN_PERIOD * M_PI / 320));
+                int y_pos = (int)(scroller->y + y_sin * SIN_FACTOR);
+                GRRLIB_DrawTile(j, y_pos+32, off_scroller, 0, 1, 1, 0xFFFFFFFF, j);
+            }
+        }
+        CompoEnd(0, 0, off_sine);
     }
+
+    // ******************************************
+    // Onscreen rendering
+    // ******************************************
 
     // Drawing Background and text
     GRRLIB_DrawImg( 0, 0, logo_background, 0, 1, 1, RGBA(255, 255, 255, alpha) );
@@ -275,31 +325,34 @@ void screen_render(void) {
     if(show_cube == true) {
         float tmp_sinx = sinx;
         for(int i=0; i<rmode->efbHeight; i++) {
-            GRRLIB_DrawTile(0+sin(tmp_sinx)*60, i+120, tex_screen3, 0, 1, 1, 0xFFFFFFFF, i);
+            GRRLIB_DrawTile(0+sin(tmp_sinx)*60, i+120, off_3d, 0, 1, 1, 0xFFFFFFFF, i);
             tmp_sinx += 0.02f;
         }
     }
 
     if(show_scroller == true) {
 
-        // blit scroller
-        GRRLIB_DrawImg(0, 300, tex_screen1, 0, 1, 1, 0xFFFFFFFF);
+        // display offscreen texture
+        GRRLIB_DrawImg(0, 300, off_sine, 0, 1, 1, 0xFFFFFFFF);
 
-        // apply V-flip effect on scroller texture then wave effect
-        GRRLIB_BMFX_FlipV(tex_screen1, tex_screen2);
-        GRRLIB_FlushTex(tex_screen2);
+        if(show_mirror == true) {
+            // apply V-flip effect on scroller offscreen texture then a wave effect
+            GRRLIB_BMFX_FlipV(off_sine, off_mirror);
+            GRRLIB_FlushTex(off_mirror);
 
-        if(show_mirror_wave == true) {
-            float tmp_sinx = sinx;
-            int alpha = mirror_alpha;
-            for(int i=0; i<rmode->efbHeight/2; i++) {
-                GRRLIB_DrawTile(5+cos(tmp_sinx*10)*5, i+(rmode->efbHeight - 80), tex_screen2, 0, 1, 1, RGBA(255, 255, 255, alpha), 2*i);
-                tmp_sinx += 0.03f;
-                alpha = (alpha<=0)?0:mirror_alpha-(2*i);
+            if(show_mirror_wave == true) {
+
+                float tmp_sinx = sinx;
+                int alpha = mirror_alpha;
+                for(int i=0; i<rmode->efbHeight/2; i++) {
+                    GRRLIB_DrawTile(5+cos(tmp_sinx*10)*5, i+(rmode->efbHeight - 80), off_mirror, 0, 1, 1, RGBA(255, 255, 255, alpha), 2*i);
+                    tmp_sinx += 0.03f;
+                    alpha = (alpha<=0)?0:mirror_alpha-(2*i);
+                }
             }
-        }
-        else {
-            GRRLIB_DrawImg(0, (rmode->efbHeight - 80), tex_screen2, 0, 1, 0.5, RGBA(255, 255, 255, mirror_alpha));
+            else {
+                GRRLIB_DrawImg(0, (rmode->efbHeight - 100), off_mirror, 0, 1, 0.5, RGBA(255, 255, 255, mirror_alpha));
+            }
         }
     }
 

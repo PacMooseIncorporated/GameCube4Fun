@@ -8,20 +8,16 @@
 
 #define NB_LETTERS 10
 
-float t = 0;
-
-t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u32 x, u32 y, char * text, bool apply_sin, int sin_factor, float sin_speed) {
-
-    GRRLIB_FlushTex(font);
+//--------------------------------------------------------------------------------
+// Create am horizontal text scroller with an optional sine effect
+//--------------------------------------------------------------------------------
+t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u32 x, u32 y, char * text) {
 
     t_scroller * scroller = malloc(sizeof(t_scroller));
     scroller->speed = speed;
     scroller->x = x;
     scroller->y = y;
     scroller->interspace = interspace;
-    scroller->apply_sin = apply_sin;
-    scroller->sin_factor = sin_factor;
-    scroller->sin_speed = sin_speed;
 
     scroller->font = font;
     scroller->text = strdup(text);
@@ -32,11 +28,7 @@ t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u3
     for(int i=0; i < NB_LETTERS; i++){
         t_letter * letter = malloc(sizeof(t_letter));
         letter->x_pos = (font->tilew + interspace)*i;
-
-        if(apply_sin == true)
-            letter->y_pos = (int)(y + (sin(scroller->sin_speed + (i*M_2_PI)))*scroller->sin_factor);
-        else
-            letter->y_pos = y;
+        letter->y_pos = y;
 
         letter->text_ptr = &text[i];
         scroller->letters[i] = letter;
@@ -48,23 +40,25 @@ t_scroller * create_scroller(GRRLIB_texImg * font, int speed, int interspace, u3
     return scroller;
 }
 
-void display_scroll(t_scroller * scroller) {
+//--------------------------------------------------------------------------------
+// Render scroll
+//--------------------------------------------------------------------------------
+void render_scroll(t_scroller * scroller) {
 
+    // draw letter by letter
     for(int i=0; i < NB_LETTERS; i++) {
         GRRLIB_DrawTile(scroller->letters[i]->x_pos, scroller->letters[i]->y_pos, scroller->font, 0, 1, 1, 0xFFFFFFFF, *(scroller->letters[i]->text_ptr)-32);
     }
 }
 
+//--------------------------------------------------------------------------------
+// Update scroll
+//--------------------------------------------------------------------------------
 void update_scroll(t_scroller * scroller) {
-
-    t += 0.1;
 
     for(int i=0; i < NB_LETTERS; i++) {
         // scroll !
         scroller->letters[i]->x_pos -= scroller->speed;
-
-        if(scroller->apply_sin == true)
-            scroller->letters[i]->y_pos = (int)(scroller->y + (sin(t*scroller->sin_speed + (i*M_2_PI)))*scroller->sin_factor);
 
         // check overflow
         if(scroller->letters[i]->x_pos < scroller->x_min_limit) {
@@ -84,7 +78,12 @@ void update_scroll(t_scroller * scroller) {
     }
 }
 
+//--------------------------------------------------------------------------------
+// Free scroll resources
+//--------------------------------------------------------------------------------
 void free_scroller(t_scroller * scroller) {
+
+    kprintf("Free scroller resources\n");
     free(scroller->text);
     free(scroller->letters);
     free(scroller);
