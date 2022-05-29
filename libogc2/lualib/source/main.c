@@ -38,7 +38,7 @@ static void reset_cb(u32 irq, void* ctx) {
 }
 
 lua_State * LUA_Init() {
-	
+
 	lua_State * L;
 	L = luaL_newstate();
 
@@ -46,6 +46,30 @@ lua_State * LUA_Init() {
 	luaL_openlibs(L);
 
 	return L;
+}
+
+static int average(lua_State *L)
+{
+	/* get number of arguments */
+	int n = lua_gettop(L);
+	double sum = 0;
+	int i;
+
+	/* loop through each argument */
+	for (i = 1; i <= n; i++)
+	{
+		/* total the arguments */
+		sum += lua_tonumber(L, i);
+	}
+
+	/* push the average */
+	lua_pushnumber(L, sum / n);
+
+	/* push the sum */
+	lua_pushnumber(L, sum);
+
+	/* return the number of results */
+	return 2;
 }
 
 int main(int argc, char *argv[]) {
@@ -104,6 +128,9 @@ int main(int argc, char *argv[]) {
 				kprintf("Cannot load script from buffer: %s\n", lua_tostring(L, -1));
 				break;
 			}
+
+			/* register our function */
+			lua_register(L, "average", average);
 
 			lua_newtable(L);
 			for (int i = 1; i <= 5; i++) {
